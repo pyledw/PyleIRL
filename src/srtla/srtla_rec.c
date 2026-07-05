@@ -1208,7 +1208,9 @@ int srtla_rec_main(const char *listen_ip, int srtla_port, const char *srt_host, 
       }
     }
     struct timeval tv = {0, 100000}; // 100ms
+#ifdef _WIN32
     __try {
+#endif
       int ready = select(maxfd + 1, &readfds, NULL, NULL, &tv);
       if (ready > 0) {
         if (FD_ISSET(srtla_sock, &readfds)) {
@@ -1221,9 +1223,11 @@ int srtla_rec_main(const char *listen_ip, int srtla_port, const char *srt_host, 
         }    
       }
       connection_cleanup(ts);
+#ifdef _WIN32
     } __except(EXCEPTION_EXECUTE_HANDLER) {
       err("SEH EXCEPTION in srtla_rec_main loop! Ignoring to prevent OBS crash.");
     }
+#endif
 #endif
   } // while loop end
   current_ctx->_is_listening = false;
