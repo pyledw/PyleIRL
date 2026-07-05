@@ -417,7 +417,11 @@ int group_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
 
   // Send the REG2 packet
   ret = SENDTO(srtla_sock, out_buf, sizeof(out_buf), 0, (struct sockaddr*)addr, ADDR_LEN);
-  if (ret != sizeof(out_buf)) goto err_destroy;
+  if (ret != sizeof(out_buf)) {
+    err("Failed to send REG2 packet to %s:%d (sent %d, expected %d, err=%s)\n",
+        print_addr(addr), port_no(addr), ret, (int)sizeof(out_buf), sock_err_str());
+    goto err_destroy;
+  }
 
   info("%s:%d: group #%llu registered\n", print_addr(addr), port_no(addr), (unsigned long long)g->logical_group_id);
 
@@ -517,7 +521,11 @@ int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
 
   uint16_t header = htobe16(SRTLA_TYPE_REG3);
   ret = SENDTO(srtla_sock, &header, sizeof(header), 0, addr, sizeof(struct sockaddr_storage));
-  if (ret != sizeof(header)) goto err_destroy;
+  if (ret != sizeof(header)) {
+    err("Failed to send REG3 packet to %s:%d (sent %d, expected %d, err=%s)\n",
+        print_addr(addr), port_no(addr), ret, (int)sizeof(header), sock_err_str());
+    goto err_destroy;
+  }
 
   info("%s:%d (group %p): connection registration\n", print_addr(addr), port_no(addr), g);
 
@@ -654,11 +662,13 @@ void handle_srtla_data(time_t ts) {
 
   // Handle srtla registration packets
   if (is_srtla_reg1(buf, n)) {
+    info("Received REG1 from %s:%d (size %d bytes)\n", print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), n);
     group_reg((struct sockaddr*)&srtla_addr, buf, ts);
     return;
   }
 
   if (is_srtla_reg2(buf, n)) {
+    info("Received REG2 from %s:%d (size %d bytes)\n", print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), n);
     conn_reg((struct sockaddr*)&srtla_addr, buf, ts);
     return;
   }
@@ -1099,10 +1109,11 @@ int srtla_rec_main(const char *listen_ip, int srtla_port, const char *srt_host, 
   if (listen_ip && *listen_ip) {
     DWORD if_index = get_interface_index_for_ip(listen_ip);
     if (if_index != 0) {
-      if (setsockopt(srtla_sock, IPPROTO_IP, IP_UNICAST_IF, (const char *)&if_index, sizeof(if_index)) == SOCKET_ERROR) {
+      DWORD if_index_nbo = htonl(if_index);
+      if (setsockopt(srtla_sock, IPPROTO_IP, IP_UNICAST_IF, (const char *)&if_index_nbo, sizeof(if_index_nbo)) == SOCKET_ERROR) {
         err("Failed to set IP_UNICAST_IF to interface index %lu (%s)\n", if_index, sock_err_str());
       } else {
-        info("Bound srtla_sock outbound routing to network interface index %lu\n", if_index);
+        info("Bound srtla_sock outbound routing to network interface index %lu (NBO: 0x%08X)\n", if_index, (unsigned int)if_index_nbo);
       }
     } else {
       err("Failed to find interface index for local IP %s\n", listen_ip);
