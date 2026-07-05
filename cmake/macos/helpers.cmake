@@ -19,18 +19,23 @@ function(set_target_properties_plugin target)
   endwhile()
 
   string(TIMESTAMP CURRENT_YEAR "%Y")
+  get_target_property(output_name ${target} OUTPUT_NAME)
+  if(NOT output_name)
+    set(output_name ${target})
+  endif()
+
   set_target_properties(
     ${target}
     PROPERTIES
       BUNDLE TRUE
       BUNDLE_EXTENSION plugin
-      XCODE_ATTRIBUTE_PRODUCT_NAME ${target}
+      XCODE_ATTRIBUTE_PRODUCT_NAME ${output_name}
       XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${MACOS_BUNDLEID}
       XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION ${PLUGIN_BUILD_NUMBER}
       XCODE_ATTRIBUTE_MARKETING_VERSION ${PLUGIN_VERSION}
       XCODE_ATTRIBUTE_GENERATE_INFOPLIST_FILE YES
       XCODE_ATTRIBUTE_INFOPLIST_FILE ""
-      XCODE_ATTRIBUTE_INFOPLIST_KEY_CFBundleDisplayName ${target}
+      XCODE_ATTRIBUTE_INFOPLIST_KEY_CFBundleDisplayName ${output_name}
       XCODE_ATTRIBUTE_INFOPLIST_KEY_NSHumanReadableCopyright "(c) ${CURRENT_YEAR} ${PLUGIN_AUTHOR}"
       XCODE_ATTRIBUTE_INSTALL_PATH "$(USER_LIBRARY_DIR)/Application Support/obs-studio/plugins"
   )
