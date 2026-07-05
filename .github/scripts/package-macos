@@ -94,15 +94,23 @@ package() {
 
   local product_name
   local product_version
-  read -r product_name product_version <<< \
+  read -r _ product_version <<< \
     "$(jq -r '. | {name, version} | join(" ")' ${buildspec_file})"
 
-  local output_name="${product_name}-${product_version}-${host_os}-universal"
+  # Dynamically detect compiled plugin name inside release directory
+  local plugin_dir=""
+  for d in ${project_root}/release/${config}/*.plugin(N/); do
+    plugin_dir="$d"
+    break
+  done
 
-  if [[ ! -d ${project_root}/release/${config}/${product_name}.plugin ]] {
+  if [[ -z ${plugin_dir} ]] {
     log_error 'No release artifact found. Run the build script or the CMake install procedure first.'
     return 2
   }
+  product_name=$(basename "${plugin_dir}" .plugin)
+
+  local output_name="${product_name}-${product_version}-${host_os}-universal"
 
   if (( package )) {
     if [[ ! -f ${project_root}/release/${config}/${product_name}.pkg ]] {
