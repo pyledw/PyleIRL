@@ -4,14 +4,13 @@ A custom, high-performance **SRTLA (SRT Link Aggregation)** Receiver plugin buil
 
 ---
 
-## 🚀 Installation & Download
+## 🚀 Download & Installation (Pre-Compiled Binaries)
 
-### 💻 Windows (Pre-Compiled DLL)
-You can download the pre-compiled version of the plugin directly from this repository:
+Select your operating system below to download and install the pre-compiled version of the plugin:
 
+### 💻 Windows
 1. **Download the Zip Package**:
-   * Navigate to the **[Install](/Install)** directory in this repository.
-   * Download the **[SRTLA_Receiver_Windows.zip](/Install/SRTLA_Receiver_Windows.zip)** archive.
+   * Download the **[SRTLA_Receiver_Windows.zip](/Install/SRTLA_Receiver_Windows.zip)** archive directly from the `/Install` directory of this repository.
 2. **Install**:
    * Close OBS Studio.
    * Extract the contents of the zip file directly into your OBS Studio installation folder:
@@ -21,21 +20,25 @@ You can download the pre-compiled version of the plugin directly from this repos
    
    *Note:* If you receive a SmartScreen warning or an error when loading, right-click the `SRTLA_Receiver.dll` file, select **Properties**, and check **Unblock** if it was blocked by Windows as a downloaded file.
 
-### 🍏 macOS (Manual Build)
-Since Apple requires plugins to be compiled and signed on macOS, you must build the plugin locally on your Mac:
-1. Follow the **Developer Build Instructions** below to compile the plugin on your Mac.
-2. Once compiled, copy the generated `.so` or `.dylib` library into your OBS plugins directory:
-   * **System-wide path**: `/Library/Application Support/obs-studio/plugins/SRTLA_Receiver/bin/`
-   * **User-specific path**: `~/Library/Application Support/obs-studio/plugins/SRTLA_Receiver/bin/`
-3. Restart OBS.
+### 🍏 macOS
+1. **Download the PKG Installer**:
+   * Once you run the GitHub Release workflow, go to the **Releases** tab of your GitHub repository.
+   * Download the `SRTLA_Receiver_macOS.pkg` installer.
+2. **Install**:
+   * Run the `.pkg` installer. It will automatically place the plugin inside the correct directory:
+     `/Library/Application Support/obs-studio/plugins/SRTLA_Receiver/bin/`
+   * Restart OBS.
 
-### 🐧 Linux (Manual Build)
-To use this plugin on Linux, you must compile it locally on your system:
-1. Follow the **Developer Build Instructions** below to compile the plugin.
-2. Once compiled, copy the library file into your OBS plugins folder:
-   * **User-specific path**: `~/.config/obs-studio/plugins/SRTLA_Receiver/bin/`
-   * **System-wide path**: `/usr/lib/obs-plugins/` or `/usr/share/obs/obs-plugins/`
-3. Restart OBS.
+### 🐧 Linux (Ubuntu/Debian)
+1. **Download the DEB Package**:
+   * Once you run the GitHub Release workflow, go to the **Releases** tab of your GitHub repository.
+   * Download the `SRTLA_Receiver_Linux.deb` installer package.
+2. **Install**:
+   * Install the package by running the following command in terminal:
+     ```bash
+     sudo dpkg -i SRTLA_Receiver_Linux.deb
+     ```
+   * Restart OBS.
 
 ---
 
@@ -72,11 +75,23 @@ If you close the **SRTLA Status** tree widget, you can reopen it at any time fro
 
 ---
 
-## 🛠️ Developer Build Instructions (Compilation)
+## 📦 How to Build and Package Installers (Windows, macOS, Linux)
 
-If you wish to compile the plugin on your local system:
+### Method A: Build Automatically via GitHub (Recommended)
+This repository includes a pre-configured GitHub Actions build workflow. **Autobuilding is disabled on general code pushes** to keep your git push clean. It will only run when you explicitly request it:
 
-### Windows
+1. **Build Manually (Workflow Dispatch)**:
+   * Go to your repository on GitHub.
+   * Click the **Actions** tab.
+   * Under the list of workflows on the left, click **Push**.
+   * Click the **Run workflow** dropdown on the right side.
+   * Select your branch (e.g., `main` or `master`) and click the green **Run workflow** button.
+   * GitHub will automatically compile the code for Windows, macOS, and Linux in parallel and attach the pre-compiled `.zip`, `.exe`, `.pkg`, and `.deb` installers directly to the completed run for you to download!
+2. **Build on Release Tag**:
+   * Pushing a tag (e.g. `v1.0.0`) automatically compiles all platform installers and attaches them directly to a **Draft Release** in your repository.
+
+### Method B: Build Locally (Windows Only)
+To compile the dll on your local Windows machine:
 1. Ensure you have **CMake 3.30+** and **Visual Studio 2022** installed.
 2. Open terminal in the project root and run:
    ```powershell
@@ -84,11 +99,3 @@ If you wish to compile the plugin on your local system:
    cmake --build build_x64 --config Release
    ```
    The compiled library will output to `build_x64/Release/SRTLA_Receiver.dll`.
-
-### macOS / Linux
-1. Ensure you have **CMake**, **Qt6**, and build compilers (Clang/GCC) installed.
-2. Open terminal in the project root and run:
-   ```bash
-   cmake -B build -S .
-   cmake --build build --config Release
-   ```
