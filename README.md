@@ -4,21 +4,41 @@ A custom, high-performance **SRTLA (SRT Link Aggregation)** Receiver plugin buil
 
 ---
 
-## 🚀 Download & Installation (Pre-Compiled Binary)
+## 🚀 Download & Installation (Pre-Compiled Binaries)
 
-You can download the pre-compiled version of the plugin directly from this repository:
+Select your operating system below to download and install the pre-compiled version of the plugin:
 
+### 💻 Windows
 1. **Download the Zip Package**:
-   * Navigate to the **[Install](/Install)** directory in this repository.
-   * Download the **[SRTLA_Receiver_Windows.zip](/Install/SRTLA_Receiver_Windows.zip)** archive.
-2. **Install the Plugin**:
+   * Download the **[SRTLA_Receiver_Windows.zip](/Install/SRTLA_Receiver_Windows.zip)** archive directly from the `/Install` directory of this repository.
+2. **Install**:
    * Close OBS Studio.
    * Extract the contents of the zip file directly into your OBS Studio installation folder:
      * Default path: `C:\Program Files\obs-studio\`
      * (This automatically copies `SRTLA_Receiver.dll` into `C:\Program Files\obs-studio\obs-plugins\64bit\`).
-3. **Launch OBS** and add a new **SRTLA Receiver** source to your scene!
+   * Restart OBS.
+   
+   *Note:* If you receive a SmartScreen warning or an error when loading, right-click the `SRTLA_Receiver.dll` file, select **Properties**, and check **Unblock** if it was blocked by Windows as a downloaded file.
 
-*Note for Windows users:* If you receive a SmartScreen warning or an error when loading, right-click the `SRTLA_Receiver.dll` file, select **Properties**, and check **Unblock** if it was blocked by Windows as a downloaded file.
+### 🍏 macOS
+1. **Download the PKG Installer**:
+   * Once you run the GitHub Release workflow, go to the **Releases** tab of your GitHub repository.
+   * Download the `SRTLA_Receiver_macOS.pkg` installer.
+2. **Install**:
+   * Run the `.pkg` installer. It will automatically place the plugin inside the correct directory:
+     `/Library/Application Support/obs-studio/plugins/SRTLA_Receiver/bin/`
+   * Restart OBS.
+
+### 🐧 Linux (Ubuntu/Debian)
+1. **Download the DEB Package**:
+   * Once you run the GitHub Release workflow, go to the **Releases** tab of your GitHub repository.
+   * Download the `SRTLA_Receiver_Linux.deb` installer package.
+2. **Install**:
+   * Install the package by running the following command in terminal:
+     ```bash
+     sudo dpkg -i SRTLA_Receiver_Linux.deb
+     ```
+   * Restart OBS.
 
 ---
 
@@ -55,9 +75,7 @@ If you close the **SRTLA Status** tree widget, you can reopen it at any time fro
 
 ---
 
-## 📦 How to Build All Platform Installers (Windows, macOS, Linux)
-
-If you need installer packages (`.exe`/`.zip` for Windows, `.pkg` for macOS, `.deb` for Linux) that automatically install the files into the correct path of OBS:
+## 📦 How to Build and Package Installers (Windows, macOS, Linux)
 
 ### Method A: Build Automatically via GitHub (Recommended)
 This repository includes a pre-configured GitHub Actions build workflow. **Autobuilding is disabled on general code pushes** to keep your git push clean. It will only run when you explicitly request it:
@@ -65,8 +83,9 @@ This repository includes a pre-configured GitHub Actions build workflow. **Autob
 1. **Build Manually (Workflow Dispatch)**:
    * Go to your repository on GitHub.
    * Click the **Actions** tab.
-   * Select **Push** or **dispatch** workflow on the left.
-   * Click **Run workflow** -> Select your branch -> Click the green **Run workflow** button.
+   * Under the list of workflows on the left, click **Push**.
+   * Click the **Run workflow** dropdown on the right side.
+   * Select your branch (e.g., `main` or `master`) and click the green **Run workflow** button.
    * GitHub will automatically compile the code for Windows, macOS, and Linux in parallel and attach the pre-compiled `.zip`, `.exe`, `.pkg`, and `.deb` installers directly to the completed run for you to download!
 2. **Build on Release Tag**:
    * Pushing a tag (e.g. `v1.0.0`) automatically compiles all platform installers and attaches them directly to a **Draft Release** in your repository.
