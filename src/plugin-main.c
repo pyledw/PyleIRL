@@ -33,6 +33,7 @@ extern void *create_srtla_dock();
 extern void setup_srtla_menu();
 
 static void frontend_event_cb(enum obs_frontend_event event, void *private_data) {
+	(void)private_data;
 	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
 		setup_srtla_menu();
 		obs_frontend_add_custom_qdock("srtla_status_dock", create_srtla_dock());

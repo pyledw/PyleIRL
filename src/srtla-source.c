@@ -36,6 +36,7 @@ static const char *srtla_source_get_name(void *type_data)
 
 static void *srtla_source_create(obs_data_t *settings, obs_source_t *source)
 {
+	UNUSED_PARAMETER(settings);
 	struct srtla_source *context = bzalloc(sizeof(struct srtla_source));
 	context->source = source;
 	context->thread_running = false;
@@ -225,6 +226,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 
 static void srtla_source_video_render(void *data, gs_effect_t *effect)
 {
+	UNUSED_PARAMETER(effect);
 	struct srtla_source *context = data;
 	if (context->media_source) {
 		obs_source_video_render(context->media_source);
@@ -245,6 +247,7 @@ static uint32_t srtla_source_get_height(void *data)
 
 static obs_properties_t *srtla_source_get_properties(void *data)
 {
+	UNUSED_PARAMETER(data);
 	obs_properties_t *props = obs_properties_create();
 	obs_properties_set_flags(props, OBS_PROPERTIES_DEFER_UPDATE);
 	
