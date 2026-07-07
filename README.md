@@ -57,6 +57,27 @@ When you add a **SRTLA Receiver** source to your scene, you will have three main
 
 ---
 
+## 🌐 Reverse Proxy Tunnel (Optional)
+
+If you don't want to configure port forwarding on your home router, you can configure the plugin to use a Reverse Proxy Tunnel via [FRP (Fast Reverse Proxy)](https://github.com/fatedier/frp). 
+
+When enabled, the plugin will seamlessly connect to your cloud server and route inbound SRTLA traffic directly back to OBS, bypassing your local firewall.
+
+### How to use the Reverse Proxy:
+1. **Cloud Server Setup**: You must run an `frps` server in the cloud (e.g. AWS, DigitalOcean, Linode). 
+   - **👉 [Click here for the full Cloud Server Setup Guide (Linux, Windows, & Docker)](REVERSE_PROXY_SETUP.md)**
+2. **Configure OBS**: Go to **Tools** -> **SRTLA Receiver** -> **Reverse Proxy Settings...**
+3. **Settings**:
+   - **Enable Reverse Proxy Tunnel**: Check this box.
+   - **Server Address**: The IP address or domain of your `frps` server in the cloud.
+   - **Server Port**: The control port of your `frps` server (typically `7000`).
+   - **Auth Token**: If your `frps` server requires a token, enter it here.
+   - **Forward Ports**: Enter the UDP port range you want to forward from the cloud directly to this plugin (e.g., `5000-5010`).
+
+*Note: The required `frpc` executable is bundled automatically with the OS releases and will run invisibly in the background when enabled!*
+
+---
+
 ## 🔌 Network & Port Forwarding Requirements
 
 To ensure external connections from cellular networks function properly, configure the following:

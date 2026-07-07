@@ -50,3 +50,28 @@ if(WIN32)
 endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME SRTLA_Receiver)
+
+# Fetch and bundle frpc for the Reverse Proxy feature
+include(FetchContent)
+if(WIN32)
+  set(FRPC_URL "https://github.com/fatedier/frp/releases/download/v0.58.1/frp_0.58.1_windows_amd64.zip")
+  set(FRPC_BIN "frpc.exe")
+elseif(APPLE)
+  set(FRPC_URL "https://github.com/fatedier/frp/releases/download/v0.58.1/frp_0.58.1_darwin_amd64.tar.gz")
+  set(FRPC_BIN "frpc")
+else()
+  set(FRPC_URL "https://github.com/fatedier/frp/releases/download/v0.58.1/frp_0.58.1_linux_amd64.tar.gz")
+  set(FRPC_BIN "frpc")
+endif()
+
+FetchContent_Declare(
+  frp
+  URL ${FRPC_URL}
+)
+FetchContent_MakeAvailable(frp)
+
+if(APPLE)
+  target_add_resource(${CMAKE_PROJECT_NAME} "${frp_SOURCE_DIR}/${FRPC_BIN}")
+else()
+  install(PROGRAMS "${frp_SOURCE_DIR}/${FRPC_BIN}" DESTINATION "data/obs-plugins/${CMAKE_PROJECT_NAME}")
+endif()

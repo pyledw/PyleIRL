@@ -14,6 +14,10 @@
 #include <QJsonArray>
 #include <QHeaderView>
 
+#include <obs.h>
+#include <util/config-file.h>
+#include <obs-frontend-api.h>
+
 extern "C" {
     void srtla_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
     void srtla_get_connection_details(int *listen_port, int *failed_conns, char* out_buffer, int max_len);
@@ -313,6 +317,87 @@ extern "C" void *create_srtla_dock()
     return new SrtlaStatusWidget();
 }
 
+#include <QFormLayout>
+#include <QDialogButtonBox>
+#include <QMessageBox>
+
+SrtlaReverseProxyDialog::SrtlaReverseProxyDialog(QWidget *parent)
+    : QDialog(parent)
+{
+    setWindowTitle("SRTLA Reverse Proxy (FRP) Settings");
+    setMinimumWidth(400);
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+    QFormLayout *formLayout = new QFormLayout();
+
+    enableProxy = new QCheckBox("Enable Reverse Proxy Tunnel");
+    
+    serverAddress = new QLineEdit();
+    serverAddress->setPlaceholderText("e.g. proxy.mydomain.com or IP");
+    
+    serverPort = new QSpinBox();
+    serverPort->setRange(1, 65535);
+    serverPort->setValue(7000); // Default FRP port
+    
+    authToken = new QLineEdit();
+    authToken->setEchoMode(QLineEdit::PasswordEchoOnEdit);
+    authToken->setPlaceholderText("Optional FRP authentication token");
+    
+    forwardPorts = new QLineEdit();
+    forwardPorts->setPlaceholderText("e.g. 5000-5010");
+    forwardPorts->setToolTip("Comma separated list of ports or ranges to forward from the proxy to this machine.");
+
+    formLayout->addRow("", enableProxy);
+    formLayout->addRow("Server Address:", serverAddress);
+    formLayout->addRow("Server Port:", serverPort);
+    formLayout->addRow("Auth Token:", authToken);
+    formLayout->addRow("Forward Ports:", forwardPorts);
+
+    mainLayout->addLayout(formLayout);
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    mainLayout->addWidget(buttonBox);
+
+    connect(buttonBox, &QDialogButtonBox::accepted, this, &SrtlaReverseProxyDialog::saveSettings);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+    // Load existing settings
+    config_t *global_config = obs_frontend_get_global_config();
+    if (global_config) {
+        enableProxy->setChecked(config_get_bool(global_config, "SRTLA_Proxy", "Enabled"));
+        const char *addr = config_get_string(global_config, "SRTLA_Proxy", "ServerAddress");
+        if (addr && *addr) serverAddress->setText(addr);
+        
+        int port = config_get_int(global_config, "SRTLA_Proxy", "ServerPort");
+        if (port > 0) serverPort->setValue(port);
+        
+        const char *token = config_get_string(global_config, "SRTLA_Proxy", "AuthToken");
+        if (token && *token) authToken->setText(token);
+        
+        const char *ports = config_get_string(global_config, "SRTLA_Proxy", "ForwardPorts");
+        if (ports && *ports) forwardPorts->setText(ports);
+    }
+}
+
+extern "C" void srtla_proxy_settings_changed();
+
+void SrtlaReverseProxyDialog::saveSettings()
+{
+    config_t *global_config = obs_frontend_get_global_config();
+    if (global_config) {
+        config_set_bool(global_config, "SRTLA_Proxy", "Enabled", enableProxy->isChecked());
+        config_set_string(global_config, "SRTLA_Proxy", "ServerAddress", serverAddress->text().toUtf8().constData());
+        config_set_int(global_config, "SRTLA_Proxy", "ServerPort", serverPort->value());
+        config_set_string(global_config, "SRTLA_Proxy", "AuthToken", authToken->text().toUtf8().constData());
+        config_set_string(global_config, "SRTLA_Proxy", "ForwardPorts", forwardPorts->text().toUtf8().constData());
+        
+        config_save_safe(global_config, "tmp", nullptr);
+    }
+    
+    srtla_proxy_settings_changed();
+    accept();
+}
+
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -323,6 +408,92 @@ extern "C" {
     void srtla_force_stop_all();
     void srtla_force_start_all();
     void srtla_force_restart_all();
+}
+
+#include <QProcess>
+#include <QFile>
+#include <QTextStream>
+#include <QStandardPaths>
+#include <QDir>
+#include <QCoreApplication>
+
+static QProcess *frpcProcess = nullptr;
+
+extern "C" void srtla_proxy_settings_changed() {
+    if (!frpcProcess) {
+        frpcProcess = new QProcess();
+        QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [=]() {
+            if (frpcProcess) {
+                frpcProcess->kill();
+                frpcProcess->waitForFinished(1000);
+            }
+        });
+    }
+
+    config_t *global_config = obs_frontend_get_global_config();
+    if (!global_config) return;
+
+    bool enabled = config_get_bool(global_config, "SRTLA_Proxy", "Enabled");
+    if (!enabled) {
+        if (frpcProcess->state() != QProcess::NotRunning) {
+            frpcProcess->kill();
+            frpcProcess->waitForFinished(1000);
+        }
+        return;
+    }
+
+    QString serverAddress = config_get_string(global_config, "SRTLA_Proxy", "ServerAddress");
+    int serverPort = config_get_int(global_config, "SRTLA_Proxy", "ServerPort");
+    QString authToken = config_get_string(global_config, "SRTLA_Proxy", "AuthToken");
+    QString forwardPorts = config_get_string(global_config, "SRTLA_Proxy", "ForwardPorts");
+
+    if (serverAddress.isEmpty() || serverPort <= 0 || forwardPorts.isEmpty()) {
+        return; // Missing configuration
+    }
+
+    // Write frpc.ini
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(configDir);
+    QString iniPath = configDir + "/frpc.ini";
+
+    QFile file(iniPath);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        out << "[common]\n";
+        out << "server_addr = " << serverAddress << "\n";
+        out << "server_port = " << serverPort << "\n";
+        if (!authToken.isEmpty()) {
+            out << "token = " << authToken << "\n";
+        }
+        
+        // Handle port ranges/lists, e.g., 5000-5010 or 5000,5001
+        out << "\n[srtla_udp]\n";
+        out << "type = udp\n";
+        out << "local_ip = 127.0.0.1\n";
+        out << "local_port = " << forwardPorts << "\n";
+        out << "remote_port = " << forwardPorts << "\n";
+        file.close();
+    }
+
+    // Restart process
+    if (frpcProcess->state() != QProcess::NotRunning) {
+        frpcProcess->kill();
+        frpcProcess->waitForFinished(1000);
+    }
+    
+    // Find bundled frpc
+    QString frpcExecutable = "frpc";
+#ifdef _WIN32
+    char *bundled_path = obs_module_file("frpc.exe");
+#else
+    char *bundled_path = obs_module_file("frpc");
+#endif
+    if (bundled_path) {
+        frpcExecutable = QString::fromUtf8(bundled_path);
+        bfree(bundled_path);
+    }
+
+    frpcProcess->start(frpcExecutable, QStringList() << "-c" << iniPath);
 }
 
 extern "C" void setup_srtla_menu() {
@@ -361,4 +532,15 @@ extern "C" void setup_srtla_menu() {
     QObject::connect(stopAction, &QAction::triggered, []() {
         srtla_force_stop_all();
     });
+
+    srtlaMenu->addSeparator();
+
+    QAction *proxyAction = srtlaMenu->addAction("Reverse Proxy Settings...");
+    QObject::connect(proxyAction, &QAction::triggered, [mainWindow]() {
+        SrtlaReverseProxyDialog dialog(mainWindow);
+        dialog.exec();
+    });
+    
+    // Start proxy on initial load if enabled
+    srtla_proxy_settings_changed();
 }

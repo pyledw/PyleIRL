@@ -31,3 +31,25 @@ private:
 private slots:
     void openLogFolder();
 };
+
+#include <QDialog>
+#include <QLineEdit>
+#include <QCheckBox>
+#include <QSpinBox>
+
+class SrtlaReverseProxyDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    SrtlaReverseProxyDialog(QWidget *parent = nullptr);
+
+private slots:
+    void saveSettings();
+
+private:
+    QCheckBox *enableProxy;
+    QLineEdit *serverAddress;
+    QSpinBox *serverPort;
+    QLineEdit *authToken;
+    QLineEdit *forwardPorts;
+};
