@@ -25,6 +25,7 @@ extern "C" {
     void srtla_force_start_by_name(const char *name);
     void srtla_force_stop_by_name(const char *name);
     void srtla_force_restart_by_name(const char *name);
+    char *obs_module_file(const char *file);
 }
 
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent)
@@ -362,7 +363,7 @@ SrtlaReverseProxyDialog::SrtlaReverseProxyDialog(QWidget *parent)
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     // Load existing settings
-    config_t *global_config = obs_frontend_get_global_config();
+    config_t *global_config = obs_frontend_get_profile_config();
     if (global_config) {
         enableProxy->setChecked(config_get_bool(global_config, "SRTLA_Proxy", "Enabled"));
         const char *addr = config_get_string(global_config, "SRTLA_Proxy", "ServerAddress");
@@ -383,7 +384,7 @@ extern "C" void srtla_proxy_settings_changed();
 
 void SrtlaReverseProxyDialog::saveSettings()
 {
-    config_t *global_config = obs_frontend_get_global_config();
+    config_t *global_config = obs_frontend_get_profile_config();
     if (global_config) {
         config_set_bool(global_config, "SRTLA_Proxy", "Enabled", enableProxy->isChecked());
         config_set_string(global_config, "SRTLA_Proxy", "ServerAddress", serverAddress->text().toUtf8().constData());
@@ -430,7 +431,7 @@ extern "C" void srtla_proxy_settings_changed() {
         });
     }
 
-    config_t *global_config = obs_frontend_get_global_config();
+    config_t *global_config = obs_frontend_get_profile_config();
     if (!global_config) return;
 
     bool enabled = config_get_bool(global_config, "SRTLA_Proxy", "Enabled");
