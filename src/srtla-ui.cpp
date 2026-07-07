@@ -25,7 +25,7 @@ extern "C" {
     void srtla_force_start_by_name(const char *name);
     void srtla_force_stop_by_name(const char *name);
     void srtla_force_restart_by_name(const char *name);
-    char *obs_module_file(const char *file);
+    char *srtla_get_frpc_path(void);
 }
 
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent)
@@ -484,11 +484,7 @@ extern "C" void srtla_proxy_settings_changed() {
     
     // Find bundled frpc
     QString frpcExecutable = "frpc";
-#ifdef _WIN32
-    char *bundled_path = obs_module_file("frpc.exe");
-#else
-    char *bundled_path = obs_module_file("frpc");
-#endif
+    char *bundled_path = srtla_get_frpc_path();
     if (bundled_path) {
         frpcExecutable = QString::fromUtf8(bundled_path);
         bfree(bundled_path);

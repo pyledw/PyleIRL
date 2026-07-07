@@ -32,6 +32,14 @@ extern struct obs_source_info srtla_source_info;
 extern void *create_srtla_dock();
 extern void setup_srtla_menu();
 
+char *srtla_get_frpc_path(void) {
+#ifdef _WIN32
+    return obs_module_file("frpc.exe");
+#else
+    return obs_module_file("frpc");
+#endif
+}
+
 static void frontend_event_cb(enum obs_frontend_event event, void *private_data) {
 	(void)private_data;
 	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
