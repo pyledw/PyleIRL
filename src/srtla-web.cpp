@@ -234,8 +234,9 @@ void srtla_web_server_start(int port) {
     svr->Get("/", [](const httplib::Request &, httplib::Response &res) {
         QFile file(":/web/index.html");
         if (file.open(QIODevice::ReadOnly)) {
-            QByteArray content = file.readAll();
-            res.set_content(content.toStdString(), "text/html");
+            res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+            res.set_header("Pragma", "no-cache");
+            res.set_content(file.readAll().toStdString(), "text/html");
         } else {
             res.status = 404;
             res.set_content("Not Found", "text/plain");
