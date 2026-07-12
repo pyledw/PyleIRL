@@ -1,0 +1,191 @@
+{
+  "current_program_scene": "Intro",
+  "current_scene": "Intro",
+  "current_transition": "Fade",
+  "groups": [],
+  "modules": {},
+  "name": "Default SRTLA",
+  "preview_locked": false,
+  "quick_transitions": [],
+  "saved_projectors": [],
+  "scaling_offsets_x": {},
+  "scaling_offsets_y": {},
+  "scene_order": [
+    {
+      "name": "Intro"
+    },
+    {
+      "name": "Live"
+    },
+    {
+      "name": "Disconnect"
+    }
+  ],
+  "sources": [
+    {
+      "balance": 0.5,
+      "deinterlace_field_order": 0,
+      "deinterlace_mode": 0,
+      "enabled": true,
+      "flags": 0,
+      "hotkeys": {},
+      "id": "srtla_source",
+      "mixers": 255,
+      "monitoring_type": 0,
+      "muted": false,
+      "name": "SRTLA Stream",
+      "prev_ver": 503382019,
+      "private_settings": {},
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "settings": {
+        "listen_port": 5050
+      },
+      "sync": 0,
+      "versioned_id": "srtla_source",
+      "volume": 1.0
+    },
+    {
+      "balance": 0.5,
+      "deinterlace_field_order": 0,
+      "deinterlace_mode": 0,
+      "enabled": true,
+      "flags": 0,
+      "hotkeys": {},
+      "id": "scene",
+      "mixers": 0,
+      "monitoring_type": 0,
+      "muted": false,
+      "name": "Intro",
+      "prev_ver": 503382019,
+      "private_settings": {},
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "settings": {
+        "id_counter": 0,
+        "items": []
+      },
+      "sync": 0,
+      "versioned_id": "scene",
+      "volume": 1.0
+    },
+    {
+      "balance": 0.5,
+      "deinterlace_field_order": 0,
+      "deinterlace_mode": 0,
+      "enabled": true,
+      "flags": 0,
+      "hotkeys": {},
+      "id": "scene",
+      "mixers": 0,
+      "monitoring_type": 0,
+      "muted": false,
+      "name": "Live",
+      "prev_ver": 503382019,
+      "private_settings": {},
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "settings": {
+        "id_counter": 1,
+        "items": [
+          {
+            "align": 5,
+            "bounds": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "bounds_align": 0,
+            "bounds_type": 0,
+            "crop_bottom": 0,
+            "crop_left": 0,
+            "crop_right": 0,
+            "crop_top": 0,
+            "group_item_backup": false,
+            "id": 1,
+            "locked": false,
+            "name": "SRTLA Stream",
+            "pos": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "private_settings": {},
+            "rot": 0.0,
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "scale_filter": "disable",
+            "visible": true
+          }
+        ]
+      },
+      "sync": 0,
+      "versioned_id": "scene",
+      "volume": 1.0
+    },
+    {
+      "balance": 0.5,
+      "deinterlace_field_order": 0,
+      "deinterlace_mode": 0,
+      "enabled": true,
+      "flags": 0,
+      "hotkeys": {},
+      "id": "scene",
+      "mixers": 0,
+      "monitoring_type": 0,
+      "muted": false,
+      "name": "Disconnect",
+      "prev_ver": 503382019,
+      "private_settings": {},
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "settings": {
+        "id_counter": 1,
+        "items": [
+          {
+            "align": 5,
+            "bounds": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "bounds_align": 0,
+            "bounds_type": 0,
+            "crop_bottom": 0,
+            "crop_left": 0,
+            "crop_right": 0,
+            "crop_top": 0,
+            "group_item_backup": false,
+            "id": 1,
+            "locked": false,
+            "name": "SRTLA Stream",
+            "pos": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "private_settings": {},
+            "rot": 0.0,
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "scale_filter": "disable",
+            "visible": true
+          }
+        ]
+      },
+      "sync": 0,
+      "versioned_id": "scene",
+      "volume": 1.0
+    }
+  ],
+  "transition_duration": 300,
+  "transitions": []
+}
