@@ -27,23 +27,31 @@ services:
             echo ""
             
             sudo apt-get update
-            sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates
+            sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq
             
             echo -e "\n\e[1;34m--> Downloading Prebuilt SRTLA Plugin...\e[0m"
             mkdir -p /tmp/srtla
-            wget -qO /tmp/srtla/plugin.tar.xz "https://github.com/pyledw/SRTLA_OBS/releases/download/2.0.0/SRTLA_Receiver-2.0.0-x86_64-ubuntu-gnu.tar.xz"
+            
+            # Fetch the download URL of the latest release asset matching ubuntu-gnu.tar.xz
+            DOWNLOAD_URL=$(curl -s https://api.github.com/repos/pyledw/PyleIRL/releases/latest | jq -r '.assets[] | select(.name | endswith("ubuntu-gnu.tar.xz")) | .browser_download_url')
+            
+            if [ -n "$DOWNLOAD_URL" ] && [ "$DOWNLOAD_URL" != "null" ]; then
+                wget -qO /tmp/srtla/plugin.tar.xz "$DOWNLOAD_URL"
+            fi
             
             if [ -f "/tmp/srtla/plugin.tar.xz" ]; then
                 tar -xf /tmp/srtla/plugin.tar.xz -C /tmp/srtla/
                 
-                mkdir -p /config/.config/obs-studio/plugins/SRTLA_Receiver/bin/64bit
-                mkdir -p /config/.config/obs-studio/plugins/SRTLA_Receiver/data
+                mkdir -p /config/.config/obs-studio/plugins/PyleIRL/bin/64bit
+                mkdir -p /config/.config/obs-studio/plugins/PyleIRL/data
                 
-                find /tmp/srtla -name "*.so" -exec cp {} /config/.config/obs-studio/plugins/SRTLA_Receiver/bin/64bit/ \;
+                find /tmp/srtla -name "*.so" -exec cp {} /config/.config/obs-studio/plugins/PyleIRL/bin/64bit/ \;
                 
                 # Copy translation/data files if they exist in the extracted folder
-                if [ -d "/tmp/srtla/data" ]; then
-                    cp -r /tmp/srtla/data/* /config/.config/obs-studio/plugins/SRTLA_Receiver/data/ 2>/dev/null || true
+                if [ -d "/tmp/srtla/share/obs/obs-plugins/PyleIRL" ]; then
+                    cp -r /tmp/srtla/share/obs/obs-plugins/PyleIRL/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
+                elif [ -d "/tmp/srtla/data" ]; then
+                    cp -r /tmp/srtla/data/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
                 fi
                 
                 echo -e "\n\e[1;32m=====================================================================\e[0m"

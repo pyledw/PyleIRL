@@ -1,6 +1,6 @@
 # Cloud OBS Docker with SRTLA
 
-This repository provides a headless, web-accessible instance of OBS Studio running in Docker, complete with the custom [SRTLA_OBS](https://github.com/pyledw/SRTLA_OBS) plugin compiled and installed.
+This repository provides a headless, web-accessible instance of OBS Studio running in Docker, complete with the custom [PyleIRL](https://github.com/pyledw/PyleIRL) plugin compiled and installed.
 
 ## Features
 - **Web UI**: Access the full OBS desktop interface directly from your browser via KasmVNC.

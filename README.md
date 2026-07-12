@@ -10,33 +10,33 @@ Select your operating system below to download and install the pre-compiled vers
 
 ### 💻 Windows
 1. **Download the Zip Package**:
-   * Download the **[SRTLA_Receiver_Windows.zip](/Install/SRTLA_Receiver_Windows.zip)** archive directly from the `/Install` directory of this repository.
+   * Download the **[PyleIRL_Windows.zip](/Install/PyleIRL_Windows.zip)** archive directly from the `/Install` directory of this repository.
 2. **Install**:
    * Close OBS Studio.
    * Extract the contents of the zip file directly into your OBS Studio installation folder:
      * Default path: `C:\Program Files\obs-studio\`
-     * (This automatically copies `SRTLA_Receiver.dll` into `C:\Program Files\obs-studio\obs-plugins\64bit\`).
+     * (This automatically copies `PyleIRL.dll` into `C:\Program Files\obs-studio\obs-plugins\64bit\`).
    * Restart OBS.
    
-   *Note:* If you receive a SmartScreen warning or an error when loading, right-click the `SRTLA_Receiver.dll` file, select **Properties**, and check **Unblock** if it was blocked by Windows as a downloaded file.
+   *Note:* If you receive a SmartScreen warning or an error when loading, right-click the `PyleIRL.dll` file, select **Properties**, and check **Unblock** if it was blocked by Windows as a downloaded file.
 
 ### 🍏 macOS
 1. **Download the PKG Installer**:
    * Once you run the GitHub Release workflow, go to the **Releases** tab of your GitHub repository.
-   * Download the `SRTLA_Receiver_macOS.pkg` installer.
+   * Download the `PyleIRL_macOS.pkg` installer.
 2. **Install**:
    * Run the `.pkg` installer. It will automatically place the plugin inside the correct directory:
-     `/Library/Application Support/obs-studio/plugins/SRTLA_Receiver/bin/`
+     `/Library/Application Support/obs-studio/plugins/PyleIRL/bin/`
    * Restart OBS.
 
 ### 🐧 Linux (Ubuntu/Debian)
 1. **Download the DEB Package**:
    * Once you run the GitHub Release workflow, go to the **Releases** tab of your GitHub repository.
-   * Download the `SRTLA_Receiver_Linux.deb` installer package.
+   * Download the `PyleIRL_Linux.deb` installer package.
 2. **Install**:
    * Install the package by running the following command in terminal:
      ```bash
-     sudo dpkg -i SRTLA_Receiver_Linux.deb
+     sudo dpkg -i PyleIRL_Linux.deb
      ```
    * Restart OBS.
 
@@ -119,4 +119,4 @@ To compile the dll on your local Windows machine:
    cmake -B build_x64 -S .
    cmake --build build_x64 --config Release
    ```
-   The compiled library will output to `build_x64/Release/SRTLA_Receiver.dll`.
+   The compiled library will output to `build_x64/Release/PyleIRL.dll`.
