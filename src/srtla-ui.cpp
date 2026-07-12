@@ -1123,7 +1123,7 @@ extern "C" void setup_srtla_menu()
 	QAction *aboutAction = srtlaMenu->addAction("About...");
 	QObject::connect(aboutAction, &QAction::triggered, [mainWindow]() {
 		QMessageBox::about(mainWindow, "About PyleIRL",
-				   QString("PyleIRL OBS Plugin\n\nVersion: %1\n\nDeveloped as part of the IRL toolbox.")
+				   QString("PyleIRL OBS Plugin\n\nVersion: %1\n\nDeveloped by PyleAdventures in order to better IRL livestreaming.")
 					   .arg(PLUGIN_VERSION));
 	});
 

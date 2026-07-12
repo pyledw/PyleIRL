@@ -5,14 +5,14 @@ FROM lscr.io/linuxserver/obs-studio:latest
 # finally clean up the build dependencies to keep the image lightweight.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        git \
-        build-essential \
-        cmake \
-        libobs-dev \
-        qt6-base-dev \
-        libqt6core5compat6-dev \
-        pkg-config \
-        ca-certificates && \
+    git \
+    build-essential \
+    cmake \
+    libobs-dev \
+    qt6-base-dev \
+    libqt6core5compat6-dev \
+    pkg-config \
+    ca-certificates && \
     cd /tmp && \
     git clone https://github.com/pyledw/PyleIRL.git && \
     cd PyleIRL && \

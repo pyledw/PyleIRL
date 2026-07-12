@@ -21,7 +21,7 @@ services:
         if ! command -v obs >/dev/null 2>&1; then
             echo -e "\e[1;32m=====================================================================\e[0m"
             echo -e "\e[1;32m WELCOME TO CLOUD OBS!\e[0m"
-            echo -e "\e[1;32m We are installing OBS Studio and building the SRTLA Plugin now.\e[0m"
+            echo -e "\e[1;32m We are installing OBS Studio and building the PyleIRL Plugin now.\e[0m"
             echo -e "\e[1;32m Please wait 3-5 minutes. Do not close this window.\e[0m"
             echo -e "\e[1;32m=====================================================================\e[0m"
             echo ""
@@ -29,29 +29,38 @@ services:
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq
             
-            echo -e "\n\e[1;34m--> Downloading Prebuilt SRTLA Plugin...\e[0m"
-            mkdir -p /tmp/srtla
+            echo -e "\n\e[1;34m--> Downloading Prebuilt PyleIRL Plugin...\e[0m"
+            mkdir -p /tmp/pyleirl
             
-            # Fetch the download URL of the latest release asset matching ubuntu-gnu.tar.xz
-            DOWNLOAD_URL=$(curl -s https://api.github.com/repos/pyledw/PyleIRL/releases/latest | jq -r '.assets[] | select(.name | endswith("ubuntu-gnu.tar.xz")) | .browser_download_url')
+            # Fetch the download URL of the latest release bypassing API rate limits
+            TAG=$$(curl -sI https://github.com/pyledw/PyleIRL/releases/latest | grep -i '^location:' | sed 's/.*\///' | tr -d '\r' | tr -d '\n')
+            DOWNLOAD_URL="https://github.com/pyledw/PyleIRL/releases/download/$${TAG}/PyleIRL-$${TAG}-x86_64-ubuntu-gnu.tar.xz"
             
-            if [ -n "$DOWNLOAD_URL" ] && [ "$DOWNLOAD_URL" != "null" ]; then
-                wget -qO /tmp/srtla/plugin.tar.xz "$DOWNLOAD_URL"
+            echo -e "\e[1;33m[DEBUG] Parsed TAG: '$$TAG'\e[0m"
+            echo -e "\e[1;33m[DEBUG] DOWNLOAD_URL: '$$DOWNLOAD_URL'\e[0m"
+            
+            if [ -n "$$DOWNLOAD_URL" ] && [ "$$DOWNLOAD_URL" != "null" ]; then
+                echo -e "\e[1;33m[DEBUG] Running wget...\e[0m"
+                wget -O /tmp/pyleirl/plugin.tar.xz "$$DOWNLOAD_URL"
+                echo -e "\e[1;33m[DEBUG] wget exit code: $$?\e[0m"
             fi
             
-            if [ -f "/tmp/srtla/plugin.tar.xz" ]; then
-                tar -xf /tmp/srtla/plugin.tar.xz -C /tmp/srtla/
+            echo -e "\e[1;33m[DEBUG] Checking downloaded file:\e[0m"
+            ls -lh /tmp/pyleirl/plugin.tar.xz || echo -e "\e[1;31m[DEBUG] File not found!\e[0m"
+            
+            if [ -s "/tmp/pyleirl/plugin.tar.xz" ]; then
+                tar -xf /tmp/pyleirl/plugin.tar.xz -C /tmp/pyleirl/
                 
                 mkdir -p /config/.config/obs-studio/plugins/PyleIRL/bin/64bit
                 mkdir -p /config/.config/obs-studio/plugins/PyleIRL/data
                 
-                find /tmp/srtla -name "*.so" -exec cp {} /config/.config/obs-studio/plugins/PyleIRL/bin/64bit/ \;
+                find /tmp/pyleirl -name "*.so" -exec cp {} /config/.config/obs-studio/plugins/PyleIRL/bin/64bit/ \;
                 
                 # Copy translation/data files if they exist in the extracted folder
-                if [ -d "/tmp/srtla/share/obs/obs-plugins/PyleIRL" ]; then
-                    cp -r /tmp/srtla/share/obs/obs-plugins/PyleIRL/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
-                elif [ -d "/tmp/srtla/data" ]; then
-                    cp -r /tmp/srtla/data/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
+                if [ -d "/tmp/pyleirl/share/obs/obs-plugins/PyleIRL" ]; then
+                    cp -r /tmp/pyleirl/share/obs/obs-plugins/PyleIRL/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
+                elif [ -d "/tmp/pyleirl/data" ]; then
+                    cp -r /tmp/pyleirl/data/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
                 fi
                 
                 echo -e "\n\e[1;32m=====================================================================\e[0m"
@@ -65,19 +74,19 @@ services:
                 sleep 15
             fi
             
-            rm -rf /tmp/srtla
+            rm -rf /tmp/pyleirl
         fi
         
         # Ensure our custom scenes are injected on every boot so they are always available
         mkdir -p /config/.config/obs-studio/basic/scenes/
-        cp /default_scenes.json "/config/.config/obs-studio/basic/scenes/Default SRTLA.json" 2>/dev/null || true
+        cp /default_scenes.json "/config/.config/obs-studio/basic/scenes/Default PyleIRL.json" 2>/dev/null || true
         chown -R abc:abc /config/.config/obs-studio/basic/scenes/
         
-        # If this is a completely fresh install (no global.ini), force OBS to load Default SRTLA by default
+        # If this is a completely fresh install (no global.ini), force OBS to load Default PyleIRL by default
         if [ ! -f "/config/.config/obs-studio/global.ini" ]; then
             echo "[Basic]" > /config/.config/obs-studio/global.ini
-            echo "SceneCollection=Default SRTLA" >> /config/.config/obs-studio/global.ini
-            echo "SceneCollectionFile=Default SRTLA" >> /config/.config/obs-studio/global.ini
+            echo "SceneCollection=Default PyleIRL" >> /config/.config/obs-studio/global.ini
+            echo "SceneCollectionFile=Default PyleIRL" >> /config/.config/obs-studio/global.ini
             chown abc:abc /config/.config/obs-studio/global.ini
         fi
         
@@ -132,5 +141,5 @@ services:
     ports:
       - "3000:3000" # KasmVNC Web UI
       - "4455:4455" # OBS WebSockets
-      - "5050-5060:5050-5060/udp" # SRTLA Ports
+      - "5050-5060:5050-5060/udp" # PyleIRL Ports
     restart: unless-stopped
