@@ -298,10 +298,19 @@
             try {
                 const res = await fetch('/api/obs_ws_config');
                 const conf = await res.json();
+                
+                let savedUrl = localStorage.getItem('wsUrl');
+                let savedPwd = localStorage.getItem('wsPassword');
+
                 if (conf.ws_enabled) {
-                    document.getElementById('ws-url').value = `ws://localhost:${conf.ws_port}`;
-                    document.getElementById('ws-password').value = conf.ws_password;
-                    connectOBS();
+                    document.getElementById('ws-url').value = savedUrl || `ws://localhost:${conf.ws_port}`;
+                    document.getElementById('ws-password').value = conf.ws_password || savedPwd || "";
+                    if (document.getElementById('ws-password').value) {
+                        connectOBS();
+                    } else {
+                        document.getElementById('ws-status-text').innerText = "OBS WebSocket requires a password.";
+                        document.getElementById('ws-auth-section').style.display = 'flex';
+                    }
                 } else {
                     document.getElementById('ws-status-text').innerText = "OBS WebSocket is disabled!";
                     document.getElementById('ws-status-indicator').className = "status disconnected";
@@ -334,9 +343,15 @@
             pollReceivers();
         }
 
+        let isRestarting = false;
+
         async function connectOBS() {
             const url = document.getElementById('ws-url').value;
             const password = document.getElementById('ws-password').value;
+            
+            localStorage.setItem('wsUrl', url);
+            localStorage.setItem('wsPassword', password);
+
             if (ws) ws.close();
             
             ws = new WebSocket(url);
@@ -349,7 +364,8 @@
                         const { challenge, salt } = msg.d.authentication;
                         authPayload = await sha256(await sha256(password + salt) + challenge);
                     }
-                    ws.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, authentication: authPayload, eventSubscriptions: 33 } }));
+                    // Subscriptions: 1023 (All)
+                    ws.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, authentication: authPayload, eventSubscriptions: 1023 } }));
                 } 
                 else if (msg.op === 2) {
                     document.getElementById('ws-status-indicator').className = "status connected";
@@ -358,6 +374,7 @@
                     document.getElementById('preview-panel').style.display = 'block';
                     document.getElementById('scenes-panel').style.display = 'block';
                     sendRequest("GetSceneList");
+                    if(previewInterval) clearInterval(previewInterval);
                     previewInterval = setInterval(() => {
                         if(currentScene) sendRequest("GetSourceScreenshot", { sourceName: currentScene, imageFormat: "jpeg", imageWidth: 640, imageHeight: 360, imageCompressionQuality: 50 });
                     }, 1000);
@@ -383,8 +400,14 @@
             };
             ws.onclose = () => {
                 document.getElementById('ws-status-indicator').className = "status disconnected";
-                document.getElementById('ws-status-text').innerText = "Disconnected";
+                document.getElementById('ws-status-text').innerText = isRestarting ? "RESTARTING OBS..." : "Disconnected (Retrying...)";
                 if(previewInterval) clearInterval(previewInterval);
+                
+                if (!isRestarting) {
+                    setTimeout(() => {
+                        if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
+                    }, 3000);
+                }
             };
         }
 
@@ -408,7 +431,22 @@
 
         async function restartOBS() {
             if(confirm("Are you sure you want to restart OBS?")) {
-                await fetch('/api/restart', {method: 'POST'});
+                isRestarting = true;
+                document.getElementById('ws-status-text').innerText = "RESTARTING OBS...";
+                document.getElementById('ws-status-text').style.color = "var(--warning)";
+                document.getElementById('ws-status-indicator').className = "status disconnected";
+                
+                try { await fetch('/api/restart', {method: 'POST'}); } catch(e) {}
+                
+                const checkInterval = setInterval(async () => {
+                    try {
+                        const r = await fetch('/api/settings');
+                        if (r.ok) {
+                            clearInterval(checkInterval);
+                            window.location.reload();
+                        }
+                    } catch(e) {}
+                }, 2000);
             }
         }
 
