@@ -73,6 +73,8 @@ static void handle_api_obs_ws_config(const httplib::Request &, httplib::Response
 
 #include <QWidget>
 #include <QDir>
+#include <QTemporaryFile>
+#include <QTextStream>
 
 static void handle_api_restart(const httplib::Request &, httplib::Response &res) {
     res.set_content("{\"status\":\"restarting\"}", "application/json");
@@ -80,9 +82,19 @@ static void handle_api_restart(const httplib::Request &, httplib::Response &res)
         QString path = QDir::toNativeSeparators(qApp->applicationFilePath());
         QString workDir = QDir::toNativeSeparators(qApp->applicationDirPath());
         
-        // Use timeout and start with working directory set to OBS bin dir
-        QString cmd = QString("timeout /t 2 >nul & start /D \"%1\" \"\" \"%2\"").arg(workDir, path);
-        QProcess::startDetached("cmd.exe", QStringList() << "/c" << cmd);
+        QString batPath = QDir::toNativeSeparators(QDir::tempPath() + QDir::separator() + "obs_pyleirl_restart.bat");
+        QFile file(batPath);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream out(&file);
+            out << "@echo off\n";
+            out << "timeout /t 2 >nul\n";
+            out << "cd /d \"" << workDir << "\"\n";
+            out << "start \"\" \"" << path << "\"\n";
+            out << "del \"%~f0\"\n"; // self delete
+            file.close();
+            
+            QProcess::startDetached("cmd.exe", QStringList() << "/c" << batPath);
+        }
         
         // Graceful exit via Main Window closeEvent
         QWidget *mainWindow = (QWidget*)obs_frontend_get_main_window();
