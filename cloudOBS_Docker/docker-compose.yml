@@ -4,7 +4,7 @@ services:
   obs-studio:
     image: lscr.io/linuxserver/webtop:debian-xfce
     container_name: obs-studio
-    shm_size: "1gb" # Required for OBS Studio and desktop environments to not crash
+    shm_size: "4gb" # Required for OBS Studio and desktop environments to not crash
     entrypoint: 
       - /bin/bash
       - -c
@@ -31,7 +31,7 @@ services:
             
             echo -e "\n\e[1;34m--> Downloading Prebuilt SRTLA Plugin...\e[0m"
             mkdir -p /tmp/srtla
-            wget -qO /tmp/srtla/plugin.tar.xz "https://github.com/pyledw/SRTLA_OBS/releases/download/1.0.0/SRTLA_Receiver-1.0.0-x86_64-ubuntu-gnu.tar.xz"
+            wget -qO /tmp/srtla/plugin.tar.xz "https://github.com/pyledw/SRTLA_OBS/releases/download/2.0.0/SRTLA_Receiver-2.0.0-x86_64-ubuntu-gnu.tar.xz"
             
             if [ -f "/tmp/srtla/plugin.tar.xz" ]; then
                 tar -xf /tmp/srtla/plugin.tar.xz -C /tmp/srtla/
