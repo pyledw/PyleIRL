@@ -1,4 +1,5 @@
 #include "srtla-ui.hpp"
+#include "srtla-web.hpp"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFrame>
@@ -1118,6 +1119,23 @@ extern "C" void setup_srtla_menu()
 		dialog.exec();
 	});
 
+	QAction *webInterfaceAction = srtlaMenu->addAction("Web Interface Settings...");
+	QObject::connect(webInterfaceAction, &QAction::triggered, [mainWindow]() {
+		SrtlaWebInterfaceDialog dialog(mainWindow);
+		dialog.exec();
+	});
+
+	// Start web server if enabled
+	config_t *global_config = obs_frontend_get_profile_config();
+	if (global_config) {
+		bool webEnabled = config_get_bool(global_config, "SRTLA_WebInterface", "Enabled");
+		int webPort = config_get_int(global_config, "SRTLA_WebInterface", "Port");
+		if (webPort == 0) webPort = 8080; // default
+		if (webEnabled) {
+			srtla_web_server_start(webPort);
+		}
+	}
+
 	srtlaMenu->addSeparator();
 
 	QAction *aboutAction = srtlaMenu->addAction("About...");
@@ -1132,4 +1150,71 @@ extern "C" void setup_srtla_menu()
 
 	// Start auto-switcher on initial load
 	SrtlaAutoSwitcher::instance().start();
+}
+
+void SrtlaAutoSwitcher::reloadRules()
+{
+	loadRules();
+}
+
+SrtlaWebInterfaceDialog::SrtlaWebInterfaceDialog(QWidget *parent) : QDialog(parent)
+{
+	setWindowTitle("SRTLA Web Interface Settings");
+	setMinimumWidth(400);
+
+	QVBoxLayout *mainLayout = new QVBoxLayout(this);
+	QFormLayout *formLayout = new QFormLayout();
+
+	enableWeb = new QCheckBox("Enable Web Interface");
+
+	webPort = new QSpinBox();
+	webPort->setRange(1, 65535);
+	webPort->setValue(8080); // Default port
+
+	formLayout->addRow("", enableWeb);
+	formLayout->addRow("Web Server Port:", webPort);
+
+	mainLayout->addLayout(formLayout);
+
+	QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+	mainLayout->addWidget(buttonBox);
+
+	connect(buttonBox, &QDialogButtonBox::accepted, this, &SrtlaWebInterfaceDialog::saveSettings);
+	connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+	// Load existing settings
+	config_t *global_config = obs_frontend_get_profile_config();
+	if (global_config) {
+		enableWeb->setChecked(config_get_bool(global_config, "SRTLA_WebInterface", "Enabled"));
+		int port = config_get_int(global_config, "SRTLA_WebInterface", "Port");
+		if (port > 0)
+			webPort->setValue(port);
+	}
+}
+
+void SrtlaWebInterfaceDialog::saveSettings()
+{
+	config_t *global_config = obs_frontend_get_profile_config();
+	if (global_config) {
+		bool previouslyEnabled = config_get_bool(global_config, "SRTLA_WebInterface", "Enabled");
+		int previousPort = config_get_int(global_config, "SRTLA_WebInterface", "Port");
+
+		bool currentlyEnabled = enableWeb->isChecked();
+		int currentPort = webPort->value();
+
+		config_set_bool(global_config, "SRTLA_WebInterface", "Enabled", currentlyEnabled);
+		config_set_int(global_config, "SRTLA_WebInterface", "Port", currentPort);
+
+		config_save_safe(global_config, "tmp", nullptr);
+
+		// Handle server restart or stop
+		if (!currentlyEnabled) {
+			srtla_web_server_stop();
+		} else if (currentlyEnabled && (!previouslyEnabled || currentPort != previousPort)) {
+			srtla_web_server_stop();
+			srtla_web_server_start(currentPort);
+		}
+	}
+
+	accept();
 }

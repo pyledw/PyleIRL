@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyleIRL - Web Control Panel</title>
+    <style>
+        :root {
+            --bg-color: #0f1115;
+            --panel-bg: rgba(255, 255, 255, 0.05);
+            --text-main: #f0f0f0;
+            --text-muted: #888;
+            --accent: #00d2ff;
+            --accent-glow: rgba(0, 210, 255, 0.3);
+            --danger: #ff4757;
+            --success: #2ed573;
+            --warning: #ffa502;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            font-weight: 300;
+            letter-spacing: 1px;
+            margin-bottom: 20px;
+            text-align: center;
+            color: var(--accent);
+            text-shadow: 0 0 10px var(--accent-glow);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 900px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 10px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: 0.3s;
+            font-weight: bold;
+        }
+
+        .tab:hover { background: rgba(255,255,255,0.1); }
+        .tab.active { background: var(--accent); color: #000; }
+
+        .tab-content {
+            display: none;
+            width: 100%;
+            max-width: 900px;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .tab-content.active { display: flex; }
+
+        .panel {
+            background: var(--panel-bg);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .panel h2 {
+            margin-top: 0;
+            font-size: 1.2rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        
+        input[type="text"], input[type="password"], input[type="number"], select {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            flex-grow: 1;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        input:focus, select:focus { border-color: var(--accent); }
+        
+        button {
+            background: var(--accent); color: #000; border: none;
+            padding: 10px 20px; border-radius: 6px; font-weight: bold;
+            cursor: pointer; transition: all 0.2s; font-size: 1rem;
+        }
+        button:hover { box-shadow: 0 0 15px var(--accent-glow); transform: translateY(-1px); }
+        button:disabled { background: #555; color: #888; cursor: not-allowed; box-shadow: none; }
+        
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { box-shadow: 0 0 15px rgba(255, 71, 87, 0.4); }
+        .btn-warning { background: var(--warning); color: black; }
+        .btn-warning:hover { box-shadow: 0 0 15px rgba(255, 165, 2, 0.4); }
+
+        .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+        .status.connected { background: var(--success); box-shadow: 0 0 8px var(--success); }
+        .status.disconnected { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+        .scenes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; }
+        .scene-btn {
+            background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main); padding: 15px; text-align: center; border-radius: 8px;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .scene-btn:hover { background: rgba(255, 255, 255, 0.1); border-color: var(--accent); }
+        .scene-btn.active { background: var(--accent); color: #000; box-shadow: 0 0 15px var(--accent-glow); border-color: var(--accent); }
+
+        .preview-container {
+            width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px;
+            overflow: hidden; position: relative; border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex; align-items: center; justify-content: center;
+        }
+        #preview-image { width: 100%; height: 100%; object-fit: contain; display: none; }
+        #preview-placeholder { color: var(--text-muted); font-size: 1.2rem; }
+
+        .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .setting-row:last-child { border-bottom: none; }
+        
+        .toggle-switch { position: relative; display: inline-block; width: 50px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.2); transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent); }
+        input:checked + .slider:before { transform: translateX(26px); }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        th { background: rgba(0,0,0,0.3); }
+        
+    </style>
+</head>
+<body>
+
+    <h1>PyleIRL Control Panel</h1>
+
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('dashboard')">Dashboard</div>
+        <div class="tab" onclick="switchTab('streaming')">Streaming</div>
+        <div class="tab" onclick="switchTab('settings')">Plugin Settings</div>
+        <div class="tab" onclick="switchTab('monitor')">SRTLA Monitor</div>
+    </div>
+
+    <!-- DASHBOARD TAB -->
+    <div id="tab-dashboard" class="tab-content active">
+        <div class="panel">
+            <h2>OBS Status & Control</h2>
+            <div style="margin-bottom: 15px; display:flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <span class="status disconnected" id="ws-status-indicator"></span>
+                    <span id="ws-status-text">Disconnected</span>
+                </div>
+                <button class="btn-warning" onclick="restartOBS()">Restart OBS</button>
+            </div>
+            
+            <div id="ws-auth-section" class="input-group" style="display:none;">
+                <input type="text" id="ws-url" value="ws://localhost:4455" placeholder="WebSocket URL">
+                <input type="password" id="ws-password" placeholder="OBS WebSocket Password">
+                <button onclick="connectOBS()">Connect</button>
+            </div>
+        </div>
+
+        <div class="panel" id="preview-panel" style="display:none;">
+            <h2>Live Preview <span id="current-scene-name" style="font-weight:normal; color:var(--accent); font-size:1rem; margin-left: 10px;"></span></h2>
+            <div class="preview-container">
+                <div id="preview-placeholder">Waiting for preview...</div>
+                <img id="preview-image" alt="Scene Preview">
+            </div>
+        </div>
+
+        <div class="panel" id="scenes-panel" style="display:none;">
+            <h2>Scenes</h2>
+            <div class="scenes-grid" id="scenes-container"></div>
+        </div>
+    </div>
+
+    <!-- STREAMING TAB -->
+    <div id="tab-streaming" class="tab-content">
+        <div class="panel">
+            <h2>Streaming Settings</h2>
+            <div style="margin-bottom:15px; font-size:0.9rem; color:var(--text-muted);">
+                Update the RTMP Server URL and Stream Key that OBS will use for broadcasting.
+            </div>
+            
+            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:15px; border-bottom:none;">
+                <label style="margin-bottom:5px; font-weight:bold;">Server URL</label>
+                <input type="text" id="stream-server" placeholder="rtmp://live.twitch.tv/app" style="width:100%; box-sizing:border-box;">
+            </div>
+            
+            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:15px; border-bottom:none;">
+                <label style="margin-bottom:5px; font-weight:bold;">Stream Key</label>
+                <div class="input-group" style="width:100%; margin-bottom:0;">
+                    <input type="password" id="stream-key" placeholder="Enter stream key">
+                    <button class="btn-outline" onclick="toggleStreamKeyVisibility()" id="btn-show-key">Show</button>
+                </div>
+            </div>
+            
+            <div style="margin-top:20px; text-align:right;">
+                <button onclick="updateStreamKey()">Apply Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS TAB -->
+    <div id="tab-settings" class="tab-content">
+        <div class="panel">
+            <h2>General Settings</h2>
+            <div class="setting-row">
+                <span>Enable Reverse Proxy (FRP)</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="setting-proxy" onchange="saveBasicSettings()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <span>Enable Scene Auto-Switcher</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="setting-autoswitch" onchange="saveBasicSettings()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <span>Enable Source Visibility Switcher</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="setting-vis-autoswitch" onchange="saveBasicSettings()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Auto-Switcher Rules <button style="float:right; padding:5px 10px;" onclick="addAutoSwitchRule()">+ Add</button></h2>
+            <table id="rules-table">
+                <tr><th>Min Kbps</th><th>Max Kbps</th><th>Target Scene</th><th></th></tr>
+            </table>
+            <br>
+            <button onclick="saveAutoSwitchRules()">Save Rules</button>
+        </div>
+    </div>
+
+    <!-- MONITOR TAB -->
+    <div id="tab-monitor" class="tab-content">
+        <div class="panel">
+            <h2>SRTLA Receivers</h2>
+            <table id="receivers-table">
+                <tr><th>Name</th><th>Port</th><th>Status</th><th>Actions</th></tr>
+            </table>
+        </div>
+        <div class="panel">
+            <h2>Live Stats</h2>
+            <pre id="stats-pre" style="background:rgba(0,0,0,0.3); padding:15px; border-radius:6px; overflow-x:auto;">Loading...</pre>
+        </div>
+    </div>
+
+    <script>
+        // SHA-256 for OBS Auth
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return btoa(String.fromCharCode.apply(null, hashArray));
+        }
+
+        let ws = null;
+        let previewInterval = null;
+        let statsInterval = null;
+        let currentScene = "";
+        let cachedScenes = [];
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+        }
+
+        async function init() {
+            // 1. Get OBS WS Config & auto connect
+            try {
+                const res = await fetch('/api/obs_ws_config');
+                const conf = await res.json();
+                if (conf.ws_enabled) {
+                    document.getElementById('ws-url').value = `ws://localhost:${conf.ws_port}`;
+                    document.getElementById('ws-password').value = conf.ws_password;
+                    connectOBS();
+                } else {
+                    document.getElementById('ws-status-text').innerText = "OBS WebSocket is disabled!";
+                    document.getElementById('ws-status-indicator').className = "status disconnected";
+                    document.getElementById('ws-auth-section').style.display = 'flex';
+                }
+            } catch(e) { console.error(e); }
+
+            // 2. Load settings
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                document.getElementById('setting-proxy').checked = data.proxy_enabled;
+                document.getElementById('setting-autoswitch').checked = data.autoswitch_enabled;
+                document.getElementById('setting-vis-autoswitch').checked = data.vis_autoswitch_enabled;
+            } catch(e) { console.error(e); }
+
+            // 3. Load stream key
+            try {
+                const res = await fetch('/api/stream_key');
+                const data = await res.json();
+                document.getElementById('stream-key').value = data.key;
+                document.getElementById('stream-server').value = data.server || '';
+            } catch(e) { console.error(e); }
+
+            // 4. Load auto switch rules
+            loadAutoSwitchRules();
+
+            // 5. Start polling receivers
+            statsInterval = setInterval(pollReceivers, 2000);
+            pollReceivers();
+        }
+
+        async function connectOBS() {
+            const url = document.getElementById('ws-url').value;
+            const password = document.getElementById('ws-password').value;
+            if (ws) ws.close();
+            
+            ws = new WebSocket(url);
+            ws.onopen = () => console.log("WS Connected");
+            ws.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.op === 0) {
+                    let authPayload = undefined;
+                    if (msg.d.authentication) {
+                        const { challenge, salt } = msg.d.authentication;
+                        authPayload = await sha256(await sha256(password + salt) + challenge);
+                    }
+                    ws.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, authentication: authPayload, eventSubscriptions: 33 } }));
+                } 
+                else if (msg.op === 2) {
+                    document.getElementById('ws-status-indicator').className = "status connected";
+                    document.getElementById('ws-status-text').innerText = "Connected";
+                    document.getElementById('ws-auth-section').style.display = 'none';
+                    document.getElementById('preview-panel').style.display = 'block';
+                    document.getElementById('scenes-panel').style.display = 'block';
+                    sendRequest("GetSceneList");
+                    previewInterval = setInterval(() => {
+                        if(currentScene) sendRequest("GetSourceScreenshot", { sourceName: currentScene, imageFormat: "jpeg", imageWidth: 640, imageHeight: 360, imageCompressionQuality: 50 });
+                    }, 1000);
+                }
+                else if (msg.op === 5 && msg.d.eventType === "CurrentProgramSceneChanged") {
+                    currentScene = msg.d.eventData.sceneName;
+                    document.getElementById('current-scene-name').innerText = "- " + currentScene;
+                    renderScenes(cachedScenes);
+                }
+                else if (msg.op === 7) {
+                    if (msg.d.requestType === "GetSceneList") {
+                        currentScene = msg.d.responseData.currentProgramSceneName;
+                        document.getElementById('current-scene-name').innerText = "- " + currentScene;
+                        cachedScenes = msg.d.responseData.scenes;
+                        renderScenes(cachedScenes);
+                    }
+                    else if (msg.d.requestType === "GetSourceScreenshot") {
+                        document.getElementById('preview-image').src = msg.d.responseData.imageData;
+                        document.getElementById('preview-image').style.display = "block";
+                        document.getElementById('preview-placeholder').style.display = "none";
+                    }
+                }
+            };
+            ws.onclose = () => {
+                document.getElementById('ws-status-indicator').className = "status disconnected";
+                document.getElementById('ws-status-text').innerText = "Disconnected";
+                if(previewInterval) clearInterval(previewInterval);
+            };
+        }
+
+        function sendRequest(requestType, requestData = {}) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ op: 6, d: { requestType, requestId: Math.random().toString(), requestData } }));
+            }
+        }
+
+        function renderScenes(scenes) {
+            const cont = document.getElementById('scenes-container');
+            cont.innerHTML = "";
+            scenes.forEach(scene => {
+                const btn = document.createElement("div");
+                btn.className = "scene-btn" + (scene.sceneName === currentScene ? " active" : "");
+                btn.innerText = scene.sceneName;
+                btn.onclick = () => sendRequest("SetCurrentProgramScene", { sceneName: scene.sceneName });
+                cont.appendChild(btn);
+            });
+        }
+
+        async function restartOBS() {
+            if(confirm("Are you sure you want to restart OBS?")) {
+                await fetch('/api/restart', {method: 'POST'});
+            }
+        }
+
+        async function updateStreamKey() {
+            const key = document.getElementById('stream-key').value;
+            const server = document.getElementById('stream-server').value;
+            await fetch('/api/stream_key', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key, server})
+            });
+            alert("Stream settings updated!");
+        }
+
+        function toggleStreamKeyVisibility() {
+            const input = document.getElementById('stream-key');
+            const btn = document.getElementById('btn-show-key');
+            if (input.type === "password") {
+                input.type = "text";
+                btn.innerText = "Hide";
+            } else {
+                input.type = "password";
+                btn.innerText = "Show";
+            }
+        }
+
+        async function saveBasicSettings() {
+            await fetch('/api/settings', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    proxy_enabled: document.getElementById('setting-proxy').checked,
+                    autoswitch_enabled: document.getElementById('setting-autoswitch').checked,
+                    vis_autoswitch_enabled: document.getElementById('setting-vis-autoswitch').checked
+                })
+            });
+        }
+
+        async function loadAutoSwitchRules() {
+            const res = await fetch('/api/autoswitch');
+            const data = await res.json();
+            const rules = JSON.parse(data.rules || "[]");
+            const table = document.getElementById('rules-table');
+            // clear
+            while(table.rows.length > 1) table.deleteRow(1);
+            rules.forEach(r => addAutoSwitchRule(r.minKbps, r.maxKbps, r.targetScene));
+        }
+
+        function addAutoSwitchRule(min=0, max=0, scene="[Return to Original Screen]") {
+            const table = document.getElementById('rules-table');
+            const row = table.insertRow();
+            row.innerHTML = `
+                <td><input type="number" value="${min}" class="rmin"></td>
+                <td><input type="number" value="${max}" class="rmax"></td>
+                <td><input type="text" value="${scene}" class="rscene"></td>
+                <td><button class="btn-danger" onclick="this.parentElement.parentElement.remove()">X</button></td>
+            `;
+        }
+
+        async function saveAutoSwitchRules() {
+            const rules = [];
+            document.querySelectorAll('#rules-table tr').forEach((row, i) => {
+                if(i === 0) return; // skip header
+                rules.push({
+                    minKbps: parseInt(row.querySelector('.rmin').value),
+                    maxKbps: parseInt(row.querySelector('.rmax').value),
+                    targetScene: row.querySelector('.rscene').value
+                });
+            });
+            
+            await fetch('/api/autoswitch', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({rules: JSON.stringify(rules)})
+            });
+            alert("Rules saved and reloaded!");
+        }
+
+        async function pollReceivers() {
+            try {
+                const res = await fetch('/api/receivers');
+                const receivers = await res.json();
+                const table = document.getElementById('receivers-table');
+                while(table.rows.length > 1) table.deleteRow(1);
+                receivers.forEach(r => {
+                    const row = table.insertRow();
+                    const statusColor = r.running ? "var(--success)" : "var(--text-muted)";
+                    row.innerHTML = `
+                        <td>${r.name}</td>
+                        <td>${r.listen_port}</td>
+                        <td style="color:${statusColor}; font-weight:bold;">${r.running ? 'Running' : 'Stopped'}</td>
+                        <td>
+                            <button onclick="receiverAction('${r.name}', 'start')" ${r.running ? 'disabled' : ''}>Start</button>
+                            <button class="btn-danger" onclick="receiverAction('${r.name}', 'stop')" ${!r.running ? 'disabled' : ''}>Stop</button>
+                            <button class="btn-warning" onclick="receiverAction('${r.name}', 'restart')">Restart</button>
+                        </td>
+                    `;
+                });
+
+                const statsRes = await fetch('/api/stats');
+                const stats = await statsRes.json();
+                document.getElementById('stats-pre').innerText = JSON.stringify(stats, null, 2);
+            } catch(e) {}
+        }
+
+        async function receiverAction(name, action) {
+            await fetch('/api/receivers/action', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, action})
+            });
+            pollReceivers();
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

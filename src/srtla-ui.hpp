@@ -111,6 +111,7 @@ public:
 
 	void start();
 	void stop();
+	void reloadRules();
 
 private slots:
 	void checkBitrate();
@@ -137,4 +138,18 @@ private:
 	void loadRules();
 
 	static void handleFrontendEvent(enum obs_frontend_event event, void *private_data);
+};
+
+class SrtlaWebInterfaceDialog : public QDialog {
+	Q_OBJECT
+
+public:
+	SrtlaWebInterfaceDialog(QWidget *parent = nullptr);
+
+private slots:
+	void saveSettings();
+
+private:
+	QCheckBox *enableWeb;
+	QSpinBox *webPort;
 };

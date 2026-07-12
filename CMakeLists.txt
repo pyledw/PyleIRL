@@ -43,6 +43,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
   src/srtla/srtla_rec.c
   src/srtla/common.c
   src/srtla-ui.cpp
+  src/srtla-web.cpp
+  src/resources.qrc
 )
 
 if(WIN32)
