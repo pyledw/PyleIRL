@@ -17,6 +17,9 @@
 #include <obs.h>
 #include <util/config-file.h>
 #include <obs-frontend-api.h>
+#include <QMessageBox>
+
+#include <plugin-support.h>
 
 extern "C" {
 void srtla_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
@@ -1077,7 +1080,7 @@ extern "C" void setup_srtla_menu()
 	QMenuBar *menuBar = mainWindow->menuBar();
 	QMenu *toolsMenu = mainWindow->findChild<QMenu *>("toolsMenu");
 
-	QMenu *srtlaMenu = new QMenu("SRTLA Receiver", mainWindow);
+	QMenu *srtlaMenu = new QMenu("PyleIRL", mainWindow);
 	if (toolsMenu) {
 		toolsMenu->addMenu(srtlaMenu);
 	} else {
@@ -1113,6 +1116,15 @@ extern "C" void setup_srtla_menu()
 	QObject::connect(autoSwitchAction, &QAction::triggered, [mainWindow]() {
 		SrtlaAutoSwitchDialog dialog(mainWindow);
 		dialog.exec();
+	});
+
+	srtlaMenu->addSeparator();
+
+	QAction *aboutAction = srtlaMenu->addAction("About...");
+	QObject::connect(aboutAction, &QAction::triggered, [mainWindow]() {
+		QMessageBox::about(mainWindow, "About PyleIRL",
+				   QString("PyleIRL OBS Plugin\n\nVersion: %1\n\nDeveloped as part of the IRL toolbox.")
+					   .arg(PLUGIN_VERSION));
 	});
 
 	// Start proxy on initial load if enabled

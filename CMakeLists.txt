@@ -49,7 +49,7 @@ if(WIN32)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32 crypt32 iphlpapi)
 endif()
 
-set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME SRTLA_Receiver)
+set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME PyleIRL)
 
 # Fetch and bundle frpc for the Reverse Proxy feature
 include(FetchContent)
