@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
         <file>web/index.html</file>
+        <file>pyle-logo.png</file>
     </qresource>
 </RCC>

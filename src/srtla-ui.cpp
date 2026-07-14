@@ -323,6 +323,18 @@ extern "C" void *create_srtla_dock()
 #include <QFormLayout>
 #include <QDialogButtonBox>
 #include <QMessageBox>
+#include <QPixmap>
+
+static void addLogoToLayout(QVBoxLayout *layout)
+{
+	QLabel *logoLabel = new QLabel();
+	QPixmap pixmap(":/pyle-logo.png");
+	if (!pixmap.isNull()) {
+		logoLabel->setPixmap(pixmap.scaledToHeight(75, Qt::SmoothTransformation));
+		logoLabel->setAlignment(Qt::AlignCenter);
+		layout->insertWidget(0, logoLabel);
+	}
+}
 
 SrtlaReverseProxyDialog::SrtlaReverseProxyDialog(QWidget *parent) : QDialog(parent)
 {
@@ -330,6 +342,7 @@ SrtlaReverseProxyDialog::SrtlaReverseProxyDialog(QWidget *parent) : QDialog(pare
 	setMinimumWidth(400);
 
 	QVBoxLayout *mainLayout = new QVBoxLayout(this);
+	addLogoToLayout(mainLayout);
 	QFormLayout *formLayout = new QFormLayout();
 
 	enableProxy = new QCheckBox("Enable Reverse Proxy Tunnel");
@@ -515,13 +528,13 @@ extern "C" void srtla_proxy_settings_changed()
 #include <QTabWidget>
 #include <QSet>
 
-
 SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 {
 	setWindowTitle("SRTLA Auto-Switch Settings");
 	setMinimumWidth(600);
 
 	QVBoxLayout *mainLayout = new QVBoxLayout(this);
+	addLogoToLayout(mainLayout);
 
 	QTabWidget *tabs = new QTabWidget();
 
@@ -1002,7 +1015,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 					if (currentName) {
 						QString currentNameStr = QString::fromUtf8(currentName);
 						if (currentNameStr != rule.targetScene) {
-							if (!targetScenes.contains(currentNameStr) && originalSceneName.isEmpty()) {
+							if (!targetScenes.contains(currentNameStr) &&
+							    originalSceneName.isEmpty()) {
 								// Only save the original scene if it's a primary scene (not in targetScenes)
 								originalSceneName = currentNameStr;
 							}
@@ -1154,7 +1168,8 @@ extern "C" void setup_srtla_menu()
 	if (global_config) {
 		bool webEnabled = config_get_bool(global_config, "SRTLA_WebInterface", "Enabled");
 		int webPort = config_get_int(global_config, "SRTLA_WebInterface", "Port");
-		if (webPort == 0) webPort = 8080; // default
+		if (webPort == 0)
+			webPort = 8080; // default
 		if (webEnabled) {
 			srtla_web_server_start(webPort);
 		}
@@ -1164,9 +1179,10 @@ extern "C" void setup_srtla_menu()
 
 	QAction *aboutAction = srtlaMenu->addAction("About...");
 	QObject::connect(aboutAction, &QAction::triggered, [mainWindow]() {
-		QMessageBox::about(mainWindow, "About PyleIRL",
-				   QString("PyleIRL OBS Plugin\n\nVersion: %1\n\nDeveloped by PyleAdventures in order to better IRL livestreaming.")
-					   .arg(PLUGIN_VERSION));
+		QMessageBox::about(
+			mainWindow, "About PyleIRL",
+			QString("PyleIRL OBS Plugin\n\nVersion: %1\n\nDeveloped by PyleAdventures in order to better IRL livestreaming.")
+				.arg(PLUGIN_VERSION));
 	});
 
 	// Start proxy on initial load if enabled
@@ -1187,6 +1203,7 @@ SrtlaWebInterfaceDialog::SrtlaWebInterfaceDialog(QWidget *parent) : QDialog(pare
 	setMinimumWidth(400);
 
 	QVBoxLayout *mainLayout = new QVBoxLayout(this);
+	addLogoToLayout(mainLayout);
 	QFormLayout *formLayout = new QFormLayout();
 
 	enableWeb = new QCheckBox("Enable Web Interface");
