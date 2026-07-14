@@ -932,6 +932,14 @@ void SrtlaAutoSwitcher::checkBitrate()
 	srtla_get_connection_stats(&is_listening, &groups, &connections);
 	srtla_get_connection_details(&listen_port, &failed_conns, details_buffer, sizeof(details_buffer));
 
+	if (!is_listening) {
+		currentMatchedRuleIndex = -1;
+		matchDurationCounter = 0;
+		currentMatchedVisRuleIndex = -1;
+		visMatchDurationCounter = 0;
+		return;
+	}
+
 	double totalKbps = 0;
 	int activeGroupsWithData = 0;
 
@@ -1049,8 +1057,11 @@ void SrtlaAutoSwitcher::checkBitrate()
 		}
 
 		visMatchDurationCounter++;
-		if (visMatchDurationCounter >= visDelay &&
-		    currentMatchedVisRuleIndex != currentlyAppliedVisRuleIndex) {
+		if (visMatchDurationCounter > visDelay) {
+			visMatchDurationCounter = visDelay;
+		}
+
+		if (visMatchDurationCounter >= visDelay) {
 			// Find all unique source names in rules to hide them by default
 			QSet<QString> allRuleSources;
 			for (const auto &r : visibilityRules) {
@@ -1062,9 +1073,11 @@ void SrtlaAutoSwitcher::checkBitrate()
 				sourceToShow = visibilityRules[currentMatchedVisRuleIndex].sourceName;
 			}
 
-			obs_source_t *currentSceneSource = obs_frontend_get_current_scene();
-			if (currentSceneSource) {
-				obs_scene_t *scene = obs_scene_from_source(currentSceneSource);
+			struct obs_frontend_source_list scenes = {};
+			obs_frontend_get_scenes(&scenes);
+			for (size_t i = 0; i < scenes.sources.num; i++) {
+				obs_source_t *scene_source = scenes.sources.array[i];
+				obs_scene_t *scene = obs_scene_from_source(scene_source);
 				if (scene) {
 					for (const auto &sourceName : allRuleSources) {
 						obs_sceneitem_t *item = obs_scene_find_source_recursive(
@@ -1075,8 +1088,9 @@ void SrtlaAutoSwitcher::checkBitrate()
 						}
 					}
 				}
-				obs_source_release(currentSceneSource);
 			}
+			obs_frontend_source_list_free(&scenes);
+
 			currentlyAppliedVisRuleIndex = currentMatchedVisRuleIndex;
 		}
 	}
