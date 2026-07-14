@@ -27,7 +27,7 @@ services:
             echo ""
             
             sudo apt-get update
-            sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq
+            sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq libqt6svg6
             
             echo -e "\n\e[1;34m--> Downloading Prebuilt PyleIRL Plugin...\e[0m"
             mkdir -p /tmp/pyleirl
