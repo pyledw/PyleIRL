@@ -345,7 +345,7 @@ SrtlaReverseProxyDialog::SrtlaReverseProxyDialog(QWidget *parent) : QDialog(pare
 	addLogoToLayout(mainLayout);
 	QFormLayout *formLayout = new QFormLayout();
 
-	enableProxy = new QCheckBox("Enable Reverse Proxy Tunnel");
+	enableProxy = new QCheckBox();
 
 	serverAddress = new QLineEdit();
 	serverAddress->setPlaceholderText("e.g. proxy.mydomain.com or IP");
@@ -362,7 +362,7 @@ SrtlaReverseProxyDialog::SrtlaReverseProxyDialog(QWidget *parent) : QDialog(pare
 	forwardPorts->setPlaceholderText("e.g. 5000-5010");
 	forwardPorts->setToolTip("Comma separated list of ports or ranges to forward from the proxy to this machine.");
 
-	formLayout->addRow(enableProxy);
+	formLayout->addRow("Enable Reverse Proxy Tunnel:", enableProxy);
 	formLayout->addRow("Server Address:", serverAddress);
 	formLayout->addRow("Server Port:", serverPort);
 	formLayout->addRow("Auth Token:", authToken);
@@ -541,7 +541,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	QWidget *sceneTab = new QWidget();
 	QFormLayout *sceneLayout = new QFormLayout(sceneTab);
 
-	enableAutoSwitch = new QCheckBox("Enable Range-Based Auto-Switch");
+	enableAutoSwitch = new QCheckBox();
 
 	switchDelay = new QSpinBox();
 	switchDelay->setRange(0, 60);
@@ -575,7 +575,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		&availableSources);
 	availableSources.sort();
 
-	sceneLayout->addRow(enableAutoSwitch);
+	sceneLayout->addRow("Enable Range-Based Auto-Switch:", enableAutoSwitch);
 	sceneLayout->addRow("Switch Delay:", switchDelay);
 
 	rulesTable = new QTableWidget();
@@ -596,7 +596,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	QWidget *visTab = new QWidget();
 	QFormLayout *visLayout = new QFormLayout(visTab);
 
-	enableVisSwitch = new QCheckBox("Enable Range-Based Source Visibility");
+	enableVisSwitch = new QCheckBox();
 
 	visSwitchDelay = new QSpinBox();
 	visSwitchDelay->setRange(0, 60);
@@ -613,7 +613,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	QPushButton *addVisRuleBtn = new QPushButton("Add Visibility Rule");
 	connect(addVisRuleBtn, &QPushButton::clicked, this, &SrtlaAutoSwitchDialog::addNewVisibilityRule);
 
-	visLayout->addRow(enableVisSwitch);
+	visLayout->addRow("Enable Range-Based Source Visibility:", enableVisSwitch);
 	visLayout->addRow("Switch Delay:", visSwitchDelay);
 	visLayout->addRow(visibilityRulesTable);
 	visLayout->addRow(addVisRuleBtn);
@@ -1206,13 +1206,13 @@ SrtlaWebInterfaceDialog::SrtlaWebInterfaceDialog(QWidget *parent) : QDialog(pare
 	addLogoToLayout(mainLayout);
 	QFormLayout *formLayout = new QFormLayout();
 
-	enableWeb = new QCheckBox("Enable Web Interface");
+	enableWeb = new QCheckBox();
 
 	webPort = new QSpinBox();
 	webPort->setRange(1, 65535);
 	webPort->setValue(8080); // Default port
 
-	formLayout->addRow(enableWeb);
+	formLayout->addRow("Enable Web Interface:", enableWeb);
 	formLayout->addRow("Web Server Port:", webPort);
 
 	mainLayout->addLayout(formLayout);
