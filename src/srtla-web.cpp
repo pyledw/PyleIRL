@@ -65,7 +65,7 @@ static void handle_api_obs_ws_config(const httplib::Request &, httplib::Response
         obj["ws_enabled"] = config_get_bool(app_config, "obs-websocket", "ServerEnabled");
         const char* pwd = config_get_string(app_config, "obs-websocket", "ServerPassword");
         obj["ws_password"] = pwd ? QString(pwd) : "";
-        obj["ws_port"] = config_get_int(app_config, "obs-websocket", "ServerPort");
+        obj["ws_port"] = static_cast<int>(config_get_int(app_config, "obs-websocket", "ServerPort"));
     }
     QJsonDocument doc(obj);
     res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
@@ -165,8 +165,8 @@ static void handle_api_autoswitch_get(const httplib::Request &, httplib::Respons
         const char* visRules = config_get_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON");
         obj["rules"] = rules ? QString(rules) : "[]";
         obj["visibility_rules"] = visRules ? QString(visRules) : "[]";
-        obj["delay"] = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
-        obj["vis_delay"] = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
+        obj["delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "Delay"));
+        obj["vis_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay"));
     }
     QJsonDocument doc(obj);
     res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
