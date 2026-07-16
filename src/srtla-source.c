@@ -107,8 +107,8 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 #endif
 		struct srtla_source *context = data;
 
-		int new_listen_port = (int)obs_data_get_int(settings, "listen_port");
-		int new_local_srt_port = (int)obs_data_get_int(settings, "local_srt_port");
+		long long new_listen_port = obs_data_get_int(settings, "listen_port");
+		long long new_local_srt_port = obs_data_get_int(settings, "local_srt_port");
 		const char *new_listen_ip = obs_data_get_string(settings, "listen_ip");
 
 		// Auto-resolve port conflicts for new sources
@@ -187,8 +187,8 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		if (thread_restart_needed || media_restart_needed) {
 			srtla_stop_thread(context);
 
-			context->listen_port = new_listen_port;
-			context->local_srt_port = new_local_srt_port;
+			context->listen_port = (int)new_listen_port;
+			context->local_srt_port = (int)new_local_srt_port;
 
 			bfree(context->listen_ip);
 			context->listen_ip = new_listen_ip ? bstrdup(new_listen_ip) : NULL;
