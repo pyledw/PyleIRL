@@ -1141,14 +1141,14 @@ void SrtlaAutoSwitcher::checkBitrate()
 		} else {
 			// No rules match (bitrate is outside of all configured low-bitrate ranges, i.e., recovered)
 
-			int max_latency_ms = 0;
+			long long max_latency_ms = 0;
 			obs_enum_sources(
 				[](void *data, obs_source_t *source) {
-					int *max_lat = static_cast<int *>(data);
+					long long *max_lat = static_cast<long long *>(data);
 					const char *id = obs_source_get_id(source);
 					if (id && strcmp(id, "srtla_source") == 0) {
 						obs_data_t *settings = obs_source_get_settings(source);
-						int lat = (int)obs_data_get_int(settings, "latency");
+						long long lat = obs_data_get_int(settings, "latency");
 						if (lat > *max_lat)
 							*max_lat = lat;
 						obs_data_release(settings);
@@ -1157,7 +1157,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 				},
 				&max_latency_ms);
 
-			int additional_recovery_delay_sec = (max_latency_ms + 999) / 1000;
+			int additional_recovery_delay_sec = static_cast<int>((max_latency_ms + 999) / 1000);
 			int totalRecoveryDelay = delay + additional_recovery_delay_sec;
 
 			matchDurationCounter++;

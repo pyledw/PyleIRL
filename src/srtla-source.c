@@ -200,10 +200,10 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 				}
 
 				char url[256];
-				int latency = (int)obs_data_get_int(settings, "latency");
+				long long latency = obs_data_get_int(settings, "latency");
 				if (latency <= 0)
 					latency = 2000;
-				snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener&latency=%d",
+				snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener&latency=%lld",
 					 context->local_srt_port, latency);
 
 				obs_data_t *media_settings = obs_data_create();
