@@ -200,11 +200,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 				}
 
 				char url[256];
-				long long latency = obs_data_get_int(settings, "latency");
-				if (latency <= 0)
-					latency = 2000;
-				snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener&latency=%lld",
-					 context->local_srt_port, latency);
+				snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener", context->local_srt_port);
 
 				obs_data_t *media_settings = obs_data_create();
 				obs_data_set_string(media_settings, "input", url);
@@ -269,7 +265,6 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
 	obs_properties_add_int(props, "listen_port", "SRTLA Listen Port (UDP)", 1, 65535, 1);
 	obs_properties_add_int(props, "local_srt_port", "Local SRT Port", 1, 65535, 1);
-	obs_properties_add_int(props, "latency", "Latency (ms)", 0, 30000, 100);
 
 	return props;
 }
@@ -279,7 +274,6 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "listen_ip", "");
 	obs_data_set_default_int(settings, "listen_port", 5000);
 	obs_data_set_default_int(settings, "local_srt_port", 4000);
-	obs_data_set_default_int(settings, "latency", 2000);
 }
 
 struct obs_source_info srtla_source_info = {

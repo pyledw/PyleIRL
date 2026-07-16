@@ -645,6 +645,11 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	switchDelay->setSuffix(" seconds");
 	switchDelay->setValue(2); // Default 2 seconds
 
+	recoveryDelay = new QSpinBox();
+	recoveryDelay->setRange(0, 60);
+	recoveryDelay->setSuffix(" seconds");
+	recoveryDelay->setValue(4); // Default 4 seconds
+
 	// Populate scenes
 	struct obs_frontend_source_list scenes = {};
 	obs_frontend_get_scenes(&scenes);
@@ -674,6 +679,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 
 	sceneLayout->addRow("Enable Range-Based Auto-Switch:", enableAutoSwitch);
 	sceneLayout->addRow("Switch Delay:", switchDelay);
+	sceneLayout->addRow("Time before Switch Back:", recoveryDelay);
 
 	rulesTable = new QTableWidget();
 	rulesTable->setColumnCount(4);
@@ -739,6 +745,13 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		int delay = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
 		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "Delay")) {
 			switchDelay->setValue(delay);
+		}
+
+		int recDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay");
+		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "RecoveryDelay")) {
+			recoveryDelay->setValue(recDelay);
+		} else {
+			recoveryDelay->setValue(4);
 		}
 
 		int visDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
@@ -861,6 +874,7 @@ void SrtlaAutoSwitchDialog::saveSettings()
 	if (global_config) {
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "Enabled", enableAutoSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "Delay", switchDelay->value());
+		config_set_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay", recoveryDelay->value());
 
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled", enableVisSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "VisDelay", visSwitchDelay->value());
@@ -1141,24 +1155,12 @@ void SrtlaAutoSwitcher::checkBitrate()
 		} else {
 			// No rules match (bitrate is outside of all configured low-bitrate ranges, i.e., recovered)
 
-			long long max_latency_ms = 0;
-			obs_enum_sources(
-				[](void *data, obs_source_t *source) {
-					long long *max_lat = static_cast<long long *>(data);
-					const char *id = obs_source_get_id(source);
-					if (id && strcmp(id, "srtla_source") == 0) {
-						obs_data_t *settings = obs_source_get_settings(source);
-						long long lat = obs_data_get_int(settings, "latency");
-						if (lat > *max_lat)
-							*max_lat = lat;
-						obs_data_release(settings);
-					}
-					return true;
-				},
-				&max_latency_ms);
-
-			int additional_recovery_delay_sec = static_cast<int>((max_latency_ms + 999) / 1000);
-			int totalRecoveryDelay = delay + additional_recovery_delay_sec;
+			int recoveryDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay");
+			if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "RecoveryDelay")) {
+				recoveryDelay = 4;
+			}
+			
+			int totalRecoveryDelay = delay + recoveryDelay;
 
 			matchDurationCounter++;
 			if (matchDurationCounter >= totalRecoveryDelay && currentlyAppliedRuleIndex != -1) {

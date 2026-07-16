@@ -85,6 +85,7 @@ private slots:
 private:
 	QComboBox *enableAutoSwitch;
 	QSpinBox *switchDelay;
+	QSpinBox *recoveryDelay;
 	QTableWidget *rulesTable;
 
 	QComboBox *enableVisSwitch;
