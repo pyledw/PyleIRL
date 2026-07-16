@@ -58,7 +58,7 @@ services:
         # Force OBS WebSocket to be enabled using Python for flawless INI parsing
         mkdir -p /config/.config/obs-studio
         touch /config/.config/obs-studio/global.ini
-        python3 -c "import re; f=open('/config/.config/obs-studio/global.ini', 'r'); text=f.read(); f.close(); text = re.sub(r'\[OBSWebSocket\].*?(?=\n\[|$)', '', text, flags=re.DOTALL); text = text.strip() + '\n\n[OBSWebSocket]\nServerEnabled=true\nServerPort=4455\n'; f=open('/config/.config/obs-studio/global.ini', 'w'); f.write(text); f.close()"
+        python3 -c "import re; f=open('/config/.config/obs-studio/global.ini', 'r'); text=f.read(); f.close(); text = re.sub(r'\[OBSWebSocket\].*?(?=\n\[|$)', '', text, flags=re.DOTALL); text = text.strip() + '\n\n[OBSWebSocket]\nServerEnabled=true\nServerPort=4455\nServerPassword=Abc123@@\n'; f=open('/config/.config/obs-studio/global.ini', 'w'); f.write(text); f.close()"
         
         
         # Delete the old plugin files to ensure a clean install
@@ -132,6 +132,10 @@ services:
         VisEnabled=true
         RulesJSON=[{"minKbps":0,"maxKbps":800,"targetScene":"Connection Failed"}]
         VisibilityRulesJSON=[{"minKbps":800,"maxKbps":1500,"sourceName":"Low Signal Strength"}]
+
+        [SRTLA_WebInterface]
+        Enabled=true
+        Port=5433
         """
         with open(os.path.join(PROFILES_DIR, 'basic.ini'), 'w') as f:
             f.write(basic_ini_content)
