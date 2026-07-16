@@ -12,7 +12,8 @@ RUN apt-get update && \
     qt6-base-dev \
     libqt6core5compat6-dev \
     pkg-config \
-    ca-certificates && \
+    ca-certificates \
+    libqt6svg6 && \
     cd /tmp && \
     git clone https://github.com/pyledw/PyleIRL.git && \
     cd PyleIRL && \
