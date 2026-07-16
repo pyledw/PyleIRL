@@ -17,6 +17,10 @@ services:
         # Create the visible installation script in a safe system folder
         cat << 'EOF' > /usr/local/bin/install-obs.sh
         #!/bin/bash
+        
+        # Capture all output and errors directly to a log file on the desktop
+        mkdir -p /config/Desktop
+        exec > >(tee -a /config/Desktop/install-error.log) 2>&1
 
         if ! command -v obs >/dev/null 2>&1; then
             echo -e "\e[1;32m=====================================================================\e[0m"
@@ -27,7 +31,15 @@ services:
             echo ""
             
             sudo apt-get update
-            sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq libqt6svg6
+            sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq adwaita-icon-theme python3
+            sudo apt-get install -y --no-install-recommends libqt5svg5 qt5-image-formats-plugins || true
+            sudo apt-get install -y --no-install-recommends libqt6svg6 qt6-svg-plugins libqt6quickvectorimage6 || true
+            
+            # AGGRESSIVE FIX: The Yami theme SVG checkboxes are fundamentally broken in KasmVNC/XFCE.
+            # We aggressively strip the QCheckBox CSS rules from the Yami theme file itself!
+            # This forces Qt to fallback to the 100% reliable native OS checkbox drawing.
+            python3 -c "import os, re; [open(os.path.join(r, f), 'w', encoding='utf-8').write(re.sub(r'(QCheckBox|QRadioButton)::[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)*\s*\{[^}]*\}', '', open(os.path.join(r, f), 'r', encoding='utf-8').read())) for r, d, files in os.walk('/usr/share/obs/obs-studio/themes') for f in files if f.endswith('.qss')]"
+
             
         fi
             
@@ -42,6 +54,12 @@ services:
         
         # Kill OBS before unpacking so the .so file isn't locked by the OS!
         killall -9 obs 2>/dev/null || true
+        
+        # Force OBS WebSocket to be enabled using Python for flawless INI parsing
+        mkdir -p /config/.config/obs-studio
+        touch /config/.config/obs-studio/global.ini
+        python3 -c "import re; f=open('/config/.config/obs-studio/global.ini', 'r'); text=f.read(); f.close(); text = re.sub(r'\[OBSWebSocket\].*?(?=\n\[|$)', '', text, flags=re.DOTALL); text = text.strip() + '\n\n[OBSWebSocket]\nServerEnabled=true\nServerPort=4455\n'; f=open('/config/.config/obs-studio/global.ini', 'w'); f.write(text); f.close()"
+        
         
         # Delete the old plugin files to ensure a clean install
         rm -rf /config/.config/obs-studio/plugins/PyleIRL/
@@ -113,8 +131,9 @@ services:
         SHORTCUT
         chmod +x /config/Desktop/obs-studio.desktop
 
-        # Launch OBS Studio
-        obs
+        # Launch OBS Studio and capture all logs!
+        echo -e "\e[1;36m Writing OBS logs to /config/obs-startup.log \e[0m"
+        obs > /config/obs-startup.log 2>&1
         EOF
         chmod +x /usr/local/bin/install-obs.sh
 
@@ -154,8 +173,13 @@ services:
       - PGID=1000
       - TZ=America/New_York
       - LIBGL_ALWAYS_SOFTWARE=1 # Required since Hyper-V VM has no GPU
+      - MESA_GL_VERSION_OVERRIDE=3.3 # Force mesa to report OpenGL 3.3 support for OBS
       - CUSTOM_PORT=3005
       - CUSTOM_HTTPS_PORT=3006
+      - QT_STYLE_OVERRIDE=Fusion # Fixes invisible checkboxes in KasmVNC
+      - QT_QPA_PLATFORM=xcb
+      - PIXELFLUX_WAYLAND=false # Forces X11 mode to fix missing UI checkboxes
+      - QT_QUICK_BACKEND=software # CRITICAL: Forces Qt6 to use CPU instead of missing GPU for rendering SVG checkboxes!
 
     volumes:
       - ./config_debian:/config

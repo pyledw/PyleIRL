@@ -192,7 +192,7 @@
                 </div>
             </div>
             
-            <div id="ws-auth-section" class="input-group" style="display:none;">
+            <div id="ws-auth-section" class="input-group">
                 <input type="text" id="ws-url" value="ws://localhost:4455" placeholder="WebSocket URL">
                 <input type="password" id="ws-password" placeholder="OBS WebSocket Password">
                 <button onclick="connectOBS(true)">Save & Connect</button>
@@ -608,7 +608,6 @@
                 else if (msg.op === 2) {
                     document.getElementById('ws-status-indicator').className = "status connected";
                     document.getElementById('ws-status-text').innerText = "Connected";
-                    document.getElementById('ws-auth-section').style.display = 'none';
                     document.getElementById('ws-disconnect-btn').style.display = 'block';
                     document.getElementById('preview-panel').style.display = 'block';
                     document.getElementById('scenes-panel').style.display = 'block';
@@ -783,10 +782,11 @@
                 if (!isRestarting) {
                     wsConnectionAttempts++;
                     document.getElementById('ws-status-indicator').className = "status disconnected";
+                    document.getElementById('ws-auth-section').style.display = 'flex';
+                    document.getElementById('ws-disconnect-btn').style.display = 'none';
                     
                     if (wsConnectionAttempts > 2) {
                         document.getElementById('ws-status-text').innerText = "Connection Refused. Please verify URL and Password.";
-                        document.getElementById('ws-auth-section').style.display = 'flex';
                         // Keep trying in background silently, but at a slower rate
                         setTimeout(() => {
                             if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
