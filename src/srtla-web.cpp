@@ -179,6 +179,7 @@ static void handle_api_restart(const httplib::Request &req, httplib::Response &r
 			QString workDir = QDir::toNativeSeparators(qApp->applicationDirPath());
 			qint64 pid = QCoreApplication::applicationPid();
 
+#ifdef _WIN32
 			QString batPath = QDir::toNativeSeparators(QDir::tempPath() + QDir::separator() +
 								   "obs_pyleirl_restart.bat");
 			QFile file(batPath);
@@ -205,6 +206,34 @@ static void handle_api_restart(const httplib::Request &req, httplib::Response &r
 
 				QProcess::startDetached("cmd.exe", QStringList() << "/c" << batPath);
 			}
+#else
+			QString shPath = QDir::tempPath() + QDir::separator() + "obs_pyleirl_restart.sh";
+			QFile file(shPath);
+			if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+				QTextStream out(&file);
+				out << "#!/bin/sh\n";
+				out << "PID=" << pid << "\n";
+				out << "COUNT=0\n";
+				out << "while kill -0 $PID 2>/dev/null; do\n";
+				out << "  sleep 1\n";
+				out << "  COUNT=$((COUNT+1))\n";
+				out << "  if [ $COUNT -gt 10 ]; then\n";
+				out << "    kill -9 $PID 2>/dev/null\n";
+				out << "    break\n";
+				out << "  fi\n";
+				out << "done\n";
+				out << "cd \"" << workDir << "\"\n";
+				out << "nohup \"" << path << "\" >/dev/null 2>&1 &\n";
+				out << "rm -f \"$0\"\n";
+				file.close();
+
+				QFile::setPermissions(shPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+								      QFileDevice::ExeOwner | QFileDevice::ReadGroup |
+								      QFileDevice::ExeGroup | QFileDevice::ReadOther |
+								      QFileDevice::ExeOther);
+				QProcess::startDetached("/bin/sh", QStringList() << shPath);
+			}
+#endif
 
 			// Graceful exit via Main Window closeEvent
 			QWidget *mainWindow = (QWidget *)obs_frontend_get_main_window();

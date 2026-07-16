@@ -194,7 +194,7 @@
             <div id="ws-auth-section" class="input-group" style="display:none;">
                 <input type="text" id="ws-url" value="ws://localhost:4455" placeholder="WebSocket URL">
                 <input type="password" id="ws-password" placeholder="OBS WebSocket Password">
-                <button onclick="connectOBS()">Save & Connect</button>
+                <button onclick="connectOBS(true)">Save & Connect</button>
             </div>
         </div>
 
@@ -487,6 +487,7 @@
         }
 
         let ws = null;
+        let wsConnectionAttempts = 0;
         let previewInterval = null;
         let statsInterval = null;
         let currentScene = "";
@@ -566,7 +567,9 @@
 
         let isRestarting = false;
 
-        async function connectOBS() {
+        async function connectOBS(manual = false) {
+            if (manual) wsConnectionAttempts = 0;
+
             const url = document.getElementById('ws-url').value;
             const password = document.getElementById('ws-password').value;
             
@@ -576,7 +579,10 @@
             if (ws) ws.close();
             
             ws = new WebSocket(url);
-            ws.onopen = () => console.log("WS Connected");
+            ws.onopen = () => {
+                console.log("WS Connected");
+                wsConnectionAttempts = 0;
+            };
             ws.onmessage = async (event) => {
                 const msg = JSON.parse(event.data);
                 if (msg.op === 0) {
@@ -747,17 +753,40 @@
                     document.getElementById('ws-status-indicator').className = "status disconnected";
                     document.getElementById('ws-status-text').innerText = "Authentication Failed. Please check password.";
                     document.getElementById('ws-auth-section').style.display = 'flex';
+                    wsConnectionAttempts = 0;
                     return;
                 }
-                document.getElementById('ws-status-indicator').className = "status disconnected";
-                document.getElementById('ws-status-text').innerText = isRestarting ? "RESTARTING OBS..." : "Disconnected (Retrying...)";
+                
                 if(previewInterval) clearInterval(previewInterval);
                 
                 if (!isRestarting) {
+                    wsConnectionAttempts++;
+                    document.getElementById('ws-status-indicator').className = "status disconnected";
+                    
+                    if (wsConnectionAttempts > 2) {
+                        document.getElementById('ws-status-text').innerText = "Connection Refused. Please verify URL and Password.";
+                        document.getElementById('ws-auth-section').style.display = 'flex';
+                        // Keep trying in background silently, but at a slower rate
+                        setTimeout(() => {
+                            if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
+                        }, 5000);
+                    } else {
+                        document.getElementById('ws-status-text').innerText = `Disconnected (Retrying... ${wsConnectionAttempts}/3)`;
+                        setTimeout(() => {
+                            if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
+                        }, 3000);
+                    }
+                } else {
+                    document.getElementById('ws-status-indicator').className = "status disconnected";
+                    document.getElementById('ws-status-text').innerText = "RESTARTING OBS...";
                     setTimeout(() => {
                         if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
                     }, 3000);
                 }
+            };
+            
+            ws.onerror = (e) => {
+                console.error("WebSocket error:", e);
             };
         }
 
