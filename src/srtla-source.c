@@ -211,9 +211,10 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 				obs_data_set_int(media_settings, "reconnect_delay_sec", 1);
 
 				char source_name[256];
-				snprintf(source_name, sizeof(source_name), "SRTLA_Internal_%d", context->listen_port);
+				const char *parent_name = obs_source_get_name(context->source);
+				snprintf(source_name, sizeof(source_name), "%s Audio", parent_name ? parent_name : "SRTLA");
 				context->media_source =
-					obs_source_create_private("ffmpeg_source", source_name, media_settings);
+					obs_source_create("ffmpeg_source", source_name, media_settings, NULL);
 				obs_data_release(media_settings);
 
 				if (context->media_source) {
@@ -280,7 +281,7 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 struct obs_source_info srtla_source_info = {
 	.id = "srtla_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
-	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_ASYNC | OBS_SOURCE_CUSTOM_DRAW | OBS_SOURCE_COMPOSITE,
+	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_ASYNC | OBS_SOURCE_CUSTOM_DRAW,
 	.get_name = srtla_source_get_name,
 	.create = srtla_source_create,
 	.destroy = srtla_source_destroy,
