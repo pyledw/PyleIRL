@@ -59,12 +59,35 @@ static void srtla_stop_thread(struct srtla_source *context)
 	}
 }
 
+static void srtla_audio_capture_cb(void *param, obs_source_t *source, const struct obs_audio_data *audio_data, bool muted)
+{
+	UNUSED_PARAMETER(source);
+	struct srtla_source *context = param;
+	if (muted) return;
+
+	struct obs_audio_info aoi;
+	if (!obs_get_audio_info(&aoi)) return;
+
+	struct obs_source_audio out = {0};
+	out.speakers = aoi.speakers;
+	out.samples_per_sec = aoi.samples_per_sec;
+	out.format = AUDIO_FORMAT_FLOAT_PLANAR;
+	for (int i = 0; i < MAX_AV_PLANES; i++) {
+		out.data[i] = audio_data->data[i];
+	}
+	out.frames = audio_data->frames;
+	out.timestamp = audio_data->timestamp;
+
+	obs_source_output_audio(context->source, &out);
+}
+
 static void srtla_source_destroy(void *data)
 {
 	struct srtla_source *context = data;
 	srtla_stop_thread(context);
 
 	if (context->media_source) {
+		obs_source_remove_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
 		obs_source_release(context->media_source);
 	}
 
@@ -195,6 +218,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 
 			if (media_restart_needed) {
 				if (context->media_source) {
+					obs_source_remove_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
 					if (obs_source_active(context->source)) obs_source_dec_active(context->media_source);
 					if (obs_source_showing(context->source)) obs_source_dec_showing(context->media_source);
 					obs_source_release(context->media_source);
@@ -214,13 +238,14 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 
 				char source_name[256];
 				const char *parent_name = obs_source_get_name(context->source);
-				snprintf(source_name, sizeof(source_name), "%s Audio", parent_name ? parent_name : "SRTLA");
+				snprintf(source_name, sizeof(source_name), "%s_Internal", parent_name ? parent_name : "SRTLA");
 				context->media_source =
-					obs_source_create("ffmpeg_source", source_name, media_settings, NULL);
+					obs_source_create_private("ffmpeg_source", source_name, media_settings);
 				obs_data_release(media_settings);
 
 				if (context->media_source) {
 					obs_source_set_audio_mixers(context->media_source, 0xFF);
+					obs_source_add_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
 					if (obs_source_active(context->source)) obs_source_inc_active(context->media_source);
 					if (obs_source_showing(context->source)) obs_source_inc_showing(context->media_source);
 				} else {
@@ -308,7 +333,7 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 struct obs_source_info srtla_source_info = {
 	.id = "srtla_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
-	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_ASYNC | OBS_SOURCE_CUSTOM_DRAW,
+	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_ASYNC | OBS_SOURCE_CUSTOM_DRAW,
 	.get_name = srtla_source_get_name,
 	.create = srtla_source_create,
 	.destroy = srtla_source_destroy,
