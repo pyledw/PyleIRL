@@ -1,5 +1,6 @@
 #include <obs-module.h>
 #include <obs-frontend-api.h>
+#include <util/platform.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -29,7 +30,7 @@ static void *srtla_stats_filter_create(obs_data_t *settings, obs_source_t *conte
 	if (port_str && *port_str) {
 		filter->listen_port = atoi(port_str);
 	} else {
-		filter->listen_port = obs_data_get_int(settings, "listen_port");
+		filter->listen_port = (int)obs_data_get_int(settings, "listen_port");
 	}
 	
 	filter->last_bytes = 0;
