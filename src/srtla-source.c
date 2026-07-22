@@ -59,7 +59,7 @@ static void srtla_stop_thread(struct srtla_source *context)
 	}
 }
 
-static void srtla_audio_capture_cb(void *param, obs_source_t *source, const struct obs_audio_data *audio_data, bool muted)
+static void srtla_audio_capture_cb(void *param, obs_source_t *source, const struct audio_data *audio_data, bool muted)
 {
 	UNUSED_PARAMETER(source);
 	struct srtla_source *context = param;
