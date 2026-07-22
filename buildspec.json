@@ -1,9 +1,13 @@
 {
     "dependencies": {
         "obs-studio": {
-            "version": "30.2.3",
+            "version": "31.1.1",
             "baseUrl": "https://github.com/obsproject/obs-studio/archive/refs/tags",
-            "label": "OBS sources"
+            "label": "OBS sources",
+            "hashes": {
+                "macos": "39751f067bacc13d44b116c5138491b5f1391f91516d3d590d874edd21292291",
+                "windows-x64": "2c8427c10b55ac6d68008df2e9a3e82f4647aaad18f105e30d4713c2de678ccf"
+            }
         },
         "prebuilt": {
             "version": "2025-07-11",
@@ -34,7 +38,7 @@
     },
     "name": "PyleIRL",
     "displayName": "PyleIRL",
-    "version": "3.1.8",
+    "version": "3.1.6",
     "author": "Your Name Here",
     "website": "https://example.com",
     "email": "me@example.com"

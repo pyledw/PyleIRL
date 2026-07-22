@@ -1,322 +1,322 @@
 version: "3.8"
 
 services:
-  obs-studio:
-    image: lscr.io/linuxserver/webtop:debian-xfce
-    container_name: obs-studio
-    shm_size: "4gb" # Required for OBS Studio and desktop environments to not crash
-    entrypoint:
-      - /bin/bash
-      - -c
-      - |
-        # Ensure the default user can run sudo without a password
-        mkdir -p /etc/sudoers.d
-        echo "ALL ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/abc
-        chmod 440 /etc/sudoers.d/abc
+    obs-studio:
+        image: lscr.io/linuxserver/webtop:debian-xfce
+        container_name: obs-studio
+        shm_size: "4gb" # Required for OBS Studio and desktop environments to not crash
+        entrypoint:
+            - /bin/bash
+            - -c
+            - |
+              # Ensure the default user can run sudo without a password
+              mkdir -p /etc/sudoers.d
+              echo "ALL ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/abc
+              chmod 440 /etc/sudoers.d/abc
 
-        # Create the visible installation script in a safe system folder
-        cat << 'EOF' > /usr/local/bin/install-obs.sh
-        #!/bin/bash
-        
-        # Capture all output and errors directly to a log file on the desktop
-        mkdir -p /config/Desktop
-        exec > >(tee -a /config/Desktop/install-error.log) 2>&1
+              # Create the visible installation script in a safe system folder
+              cat << 'EOF' > /usr/local/bin/install-obs.sh
+              #!/bin/bash
 
-        if ! command -v obs >/dev/null 2>&1; then
-            echo -e "\e[1;32m=====================================================================\e[0m"
-            echo -e "\e[1;32m WELCOME TO CLOUD OBS!\e[0m"
-            echo -e "\e[1;32m We are installing OBS Studio and building the PyleIRL Plugin now.\e[0m"
-            echo -e "\e[1;32m Please wait 3-5 minutes. Do not close this window.\e[0m"
-            echo -e "\e[1;32m=====================================================================\e[0m"
-            echo ""
-            
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq adwaita-icon-theme python3
-            sudo apt-get install -y --no-install-recommends libqt5svg5 qt5-image-formats-plugins || true
-            sudo apt-get install -y --no-install-recommends libqt6svg6 qt6-svg-plugins libqt6quickvectorimage6 || true
-            
-            # AGGRESSIVE FIX: The Yami theme SVG checkboxes are fundamentally broken in KasmVNC/XFCE.
-            # We aggressively strip the QCheckBox CSS rules from the Yami theme file itself!
-            # This forces Qt to fallback to the 100% reliable native OS checkbox drawing.
-            python3 -c "import os, re; [open(os.path.join(r, f), 'w', encoding='utf-8').write(re.sub(r'(QCheckBox|QRadioButton)::[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)*\s*\{[^}]*\}', '', open(os.path.join(r, f), 'r', encoding='utf-8').read())) for r, d, files in os.walk('/usr/share/obs/obs-studio/themes') for f in files if f.endswith('.qss')]"
+              # Capture all output and errors directly to a log file on the desktop
+              mkdir -p /config/Desktop
+              exec > >(tee -a /config/Desktop/install-error.log) 2>&1
 
-            
-        fi
-            
-        # Fetch the download URL of the latest release bypassing API rate limits
-        TAG=$$(curl -sI https://github.com/pyledw/PyleIRL/releases/latest | grep -i '^location:' | sed 's/.*\///' | tr -d '\r' | tr -d '\n')
-        DOWNLOAD_URL="https://github.com/pyledw/PyleIRL/releases/download/$${TAG}/PyleIRL-$${TAG}-x86_64-ubuntu-gnu.tar.xz"
-        
-        echo -e "\n\e[1;35m=====================================================================\e[0m"
-        echo -e "\e[1;35m FOUND LATEST VERSION: $$TAG\e[0m"
-        echo -e "\e[1;35m Downloading and installing version $$TAG now...\e[0m"
-        echo -e "\e[1;35m=====================================================================\e[0m\n"
-        
-        # Kill OBS before unpacking so the .so file isn't locked by the OS!
-        killall -9 obs 2>/dev/null || true
-        
-        # Force OBS WebSocket to be enabled using Python for flawless INI parsing
-        mkdir -p /config/.config/obs-studio
-        touch /config/.config/obs-studio/global.ini
-        python3 -c "import re; f=open('/config/.config/obs-studio/global.ini', 'r'); text=f.read(); f.close(); text = re.sub(r'\[OBSWebSocket\].*?(?=\n\[|$)', '', text, flags=re.DOTALL); text = text.strip() + '\n\n[OBSWebSocket]\nServerEnabled=true\nServerPort=4455\nServerPassword=Abc123@@\n'; f=open('/config/.config/obs-studio/global.ini', 'w'); f.write(text); f.close()"
-        
-        
-        # Delete the old plugin files to ensure a clean install
-        rm -rf /config/.config/obs-studio/plugins/PyleIRL/
-        
-        mkdir -p /tmp/pyleirl
-        
-        if [ -n "$$DOWNLOAD_URL" ] && [ "$$DOWNLOAD_URL" != "null" ]; then
-            echo -e "\e[1;33m[DEBUG] Running wget...\e[0m"
-            wget -O /tmp/pyleirl/plugin.tar.xz "$$DOWNLOAD_URL"
-            echo -e "\e[1;33m[DEBUG] wget exit code: $$?\e[0m"
-        fi
-        
-        echo -e "\e[1;33m[DEBUG] Checking downloaded file:\e[0m"
-        ls -lh /tmp/pyleirl/plugin.tar.xz || echo -e "\e[1;31m[DEBUG] File not found!\e[0m"
-        
-        if [ -s "/tmp/pyleirl/plugin.tar.xz" ]; then
-            tar -xf /tmp/pyleirl/plugin.tar.xz -C /tmp/pyleirl/
-            
-            mkdir -p /config/.config/obs-studio/plugins/PyleIRL/bin/64bit
-            mkdir -p /config/.config/obs-studio/plugins/PyleIRL/data
-            
-            find /tmp/pyleirl -name "*.so" -exec cp -f {} /config/.config/obs-studio/plugins/PyleIRL/bin/64bit/ \;
-            
-            # Copy translation/data files if they exist in the extracted folder
-            if [ -d "/tmp/pyleirl/share/obs/obs-plugins/PyleIRL" ]; then
-                cp -r /tmp/pyleirl/share/obs/obs-plugins/PyleIRL/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
-            elif [ -d "/tmp/pyleirl/data" ]; then
-                cp -r /tmp/pyleirl/data/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
-            fi
-            
-            echo -e "\n\e[1;32m=====================================================================\e[0m"
-            echo -e "\e[1;32m INSTALLATION COMPLETE! Launching OBS Studio...\e[0m"
-            echo -e "\e[1;32m=====================================================================\e[0m"
-            sleep 3
-        else
-            echo -e "\n\e[1;31m=====================================================================\e[0m"
-            echo -e "\e[1;31m ERROR: Failed to download plugin release! Check URL.\e[0m"
-            echo -e "\e[1;31m=====================================================================\e[0m"
-            sleep 15
-        fi
-        
-        rm -rf /tmp/pyleirl
+              if ! command -v obs >/dev/null 2>&1; then
+                  echo -e "\e[1;32m=====================================================================\e[0m"
+                  echo -e "\e[1;32m WELCOME TO CLOUD OBS!\e[0m"
+                  echo -e "\e[1;32m We are installing OBS Studio and building the PyleIRL Plugin now.\e[0m"
+                  echo -e "\e[1;32m Please wait 3-5 minutes. Do not close this window.\e[0m"
+                  echo -e "\e[1;32m=====================================================================\e[0m"
+                  echo ""
+                  
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends obs-studio wget xz-utils ca-certificates curl jq adwaita-icon-theme python3
+                  sudo apt-get install -y --no-install-recommends libqt5svg5 qt5-image-formats-plugins || true
+                  sudo apt-get install -y --no-install-recommends libqt6svg6 qt6-svg-plugins libqt6quickvectorimage6 || true
+                  
+                  # AGGRESSIVE FIX: The Yami theme SVG checkboxes are fundamentally broken in KasmVNC/XFCE.
+                  # We aggressively strip the QCheckBox CSS rules from the Yami theme file itself!
+                  # This forces Qt to fallback to the 100% reliable native OS checkbox drawing.
+                  python3 -c "import os, re; [open(os.path.join(r, f), 'w', encoding='utf-8').write(re.sub(r'(QCheckBox|QRadioButton)::[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)*\s*\{[^}]*\}', '', open(os.path.join(r, f), 'r', encoding='utf-8').read())) for r, d, files in os.walk('/usr/share/obs/obs-studio/themes') for f in files if f.endswith('.qss')]"
 
-        # Install obs-shaderfilter plugin
-        SHADER_TAG=$$(curl -sI https://github.com/exeldro/obs-shaderfilter/releases/latest | grep -i '^location:' | sed 's/.*\///' | tr -d '\r' | tr -d '\n')
-        SHADER_DOWNLOAD_URL="https://github.com/exeldro/obs-shaderfilter/releases/download/$${SHADER_TAG}/obs-shaderfilter-$${SHADER_TAG}-ubuntu-22.04.tar.gz"
-        
-        echo -e "\n\e[1;35m=====================================================================\e[0m"
-        echo -e "\e[1;35m Downloading and installing obs-shaderfilter...\e[0m"
-        echo -e "\e[1;35m=====================================================================\e[0m\n"
-        
-        rm -rf /config/.config/obs-studio/plugins/obs-shaderfilter/
-        mkdir -p /tmp/shaderfilter
-        
-        if [ -n "$$SHADER_DOWNLOAD_URL" ] && [ "$$SHADER_DOWNLOAD_URL" != "null" ]; then
-            wget -O /tmp/shaderfilter/plugin.tar.gz "$$SHADER_DOWNLOAD_URL"
-        fi
-        
-        if [ -s "/tmp/shaderfilter/plugin.tar.gz" ]; then
-            tar -xf /tmp/shaderfilter/plugin.tar.gz -C /tmp/shaderfilter/
-            
-            mkdir -p /config/.config/obs-studio/plugins/obs-shaderfilter/bin/64bit
-            mkdir -p /config/.config/obs-studio/plugins/obs-shaderfilter/data
-            
-            cp -f /tmp/shaderfilter/obs-shaderfilter/bin/64bit/*.so /config/.config/obs-studio/plugins/obs-shaderfilter/bin/64bit/ 2>/dev/null || true
-            cp -r /tmp/shaderfilter/obs-shaderfilter/data/* /config/.config/obs-studio/plugins/obs-shaderfilter/data/ 2>/dev/null || true
-            
-            echo -e "\e[1;32m obs-shaderfilter installation complete!\e[0m"
-        else
-            echo -e "\e[1;31m ERROR: Failed to download obs-shaderfilter plugin!\e[0m"
-        fi
-        
-        rm -rf /tmp/shaderfilter
+                  
+              fi
+                  
+              # Fetch the download URL of the latest release bypassing API rate limits
+              TAG=$$(curl -sI https://github.com/pyledw/PyleIRL/releases/latest | grep -i '^location:' | sed 's/.*\///' | tr -d '\r' | tr -d '\n')
+              DOWNLOAD_URL="https://github.com/pyledw/PyleIRL/releases/download/$${TAG}/PyleIRL-$${TAG}-x86_64-ubuntu-gnu.tar.xz"
 
-        # Install obs-advanced-masks plugin
-        echo -e "\n\e[1;35m=====================================================================\e[0m"
-        echo -e "\e[1;35m Downloading and installing obs-advanced-masks...\e[0m"
-        echo -e "\e[1;35m=====================================================================\e[0m\n"
-        
-        MASK_URL=$$(python3 -c "import urllib.request, json; data=json.loads(urllib.request.urlopen('https://api.github.com/repos/FiniteSingularity/obs-advanced-masks/releases/latest').read()); urls=[a['browser_download_url'] for a in data['assets'] if 'ubuntu' in a['name'].lower()]; print(urls[0] if urls else '')")
-        
-        rm -rf /config/.config/obs-studio/plugins/obs-advanced-masks/
-        mkdir -p /tmp/advanced-masks
-        
-        if [ -n "$$MASK_URL" ]; then
-            wget -O /tmp/advanced-masks/plugin.zip "$$MASK_URL"
-        fi
-        
-        if [ -s "/tmp/advanced-masks/plugin.zip" ]; then
-            python3 -m zipfile -e /tmp/advanced-masks/plugin.zip /tmp/advanced-masks/
-            MASK_TAR=$$(ls /tmp/advanced-masks/*.tar.gz 2>/dev/null | head -n 1)
-            if [ -n "$$MASK_TAR" ]; then
-                tar -xf "$$MASK_TAR" -C /tmp/advanced-masks/
-                
-                mkdir -p /config/.config/obs-studio/plugins/obs-advanced-masks/bin/64bit
-                mkdir -p /config/.config/obs-studio/plugins/obs-advanced-masks/data
-                
-                cp -f /tmp/advanced-masks/obs-advanced-masks/bin/64bit/*.so /config/.config/obs-studio/plugins/obs-advanced-masks/bin/64bit/ 2>/dev/null || true
-                cp -r /tmp/advanced-masks/obs-advanced-masks/data/* /config/.config/obs-studio/plugins/obs-advanced-masks/data/ 2>/dev/null || true
-                
-                echo -e "\e[1;32m obs-advanced-masks installation complete!\e[0m"
-            else
-                echo -e "\e[1;31m ERROR: Could not find tar.gz inside the zip!\e[0m"
-            fi
-        else
-            echo -e "\e[1;31m ERROR: Failed to download obs-advanced-masks plugin!\e[0m"
-        fi
-        
-        rm -rf /tmp/advanced-masks
+              echo -e "\n\e[1;35m=====================================================================\e[0m"
+              echo -e "\e[1;35m FOUND LATEST VERSION: $$TAG\e[0m"
+              echo -e "\e[1;35m Downloading and installing version $$TAG now...\e[0m"
+              echo -e "\e[1;35m=====================================================================\e[0m\n"
 
-        # Generate and force PyleDefault Profile and Scene Collection
-        echo -e "\e[1;36m Generating PyleDefault optimized 1080p profile and scenes...\e[0m"
-        cat << 'PYLE_DEFAULT' > /config/setup-pyle-defaults.py
-        import os, json, configparser
-        OBS_CONFIG_DIR = '/config/.config/obs-studio'
-        PROFILES_DIR = os.path.join(OBS_CONFIG_DIR, 'basic', 'profiles', 'PyleDefault')
-        SCENES_DIR = os.path.join(OBS_CONFIG_DIR, 'basic', 'scenes')
-        os.makedirs(PROFILES_DIR, exist_ok=True)
-        os.makedirs(SCENES_DIR, exist_ok=True)
-        basic_ini_content = """[General]
-        Name=PyleDefault
+              # Kill OBS before unpacking so the .so file isn't locked by the OS!
+              killall -9 obs 2>/dev/null || true
 
-        [Video]
-        BaseCX=1920
-        BaseCY=1080
-        OutputCX=1920
-        OutputCY=1080
-        FPSCommon=60
+              # Force OBS WebSocket to be enabled using Python for flawless INI parsing
+              mkdir -p /config/.config/obs-studio
+              touch /config/.config/obs-studio/global.ini
+              python3 -c "import re; f=open('/config/.config/obs-studio/global.ini', 'r'); text=f.read(); f.close(); text = re.sub(r'\[OBSWebSocket\].*?(?=\n\[|$)', '', text, flags=re.DOTALL); text = text.strip() + '\n\n[OBSWebSocket]\nServerEnabled=true\nServerPort=4455\nServerPassword=Abc123@@\n'; f=open('/config/.config/obs-studio/global.ini', 'w'); f.write(text); f.close()"
 
-        [SimpleOutput]
-        VBitrate=4500
-        StreamEncoder=x264
-        Preset=fast
 
-        [SRTLA_AutoSwitch]
-        Enabled=true
-        VisEnabled=true
-        RulesJSON=[{"minKbps":0,"maxKbps":800,"targetScene":"Connection Failed"}]
-        VisibilityRulesJSON=[{"minKbps":800,"maxKbps":1500,"sourceName":"Low Signal Strength"}]
+              # Delete the old plugin files to ensure a clean install
+              rm -rf /config/.config/obs-studio/plugins/PyleIRL/
 
-        [SRTLA_WebInterface]
-        Enabled=true
-        Port=5433
-        """
-        with open(os.path.join(PROFILES_DIR, 'basic.ini'), 'w') as f:
-            f.write(basic_ini_content)
-        scene_json = {'current_program_scene': 'Live', 'current_scene': 'Live', 'current_transition': 'Fade', 'groups': [], 'modules': {}, 'name': 'PyleDefault', 'quick_transitions': [], 'saved_projectors': [], 'scene_order': [{'name': 'Live'}, {'name': 'Connection Failed'}], 'sources': [{'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'scene', 'mixers': 0, 'monitoring_type': 0, 'muted': False, 'name': 'Live', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'custom_size': False, 'id_counter': 3, 'items': [{'align': 5, 'bounds': {'x': 1920.0, 'y': 1080.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 1, 'locked': False, 'name': 'SRTLA Camera', 'pos': {'x': 0.0, 'y': 0.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}, {'align': 5, 'bounds': {'x': 1920.0, 'y': 100.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 2, 'locked': False, 'name': 'Low Signal Strength', 'pos': {'x': 0.0, 'y': 950.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}, {'align': 5, 'bounds': {'x': 1920.0, 'y': 100.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 3, 'locked': False, 'name': 'Current KBPS', 'pos': {'x': 0.0, 'y': 50.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}]}, 'sync': 0, 'versioned_id': 'scene', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'scene', 'mixers': 0, 'monitoring_type': 0, 'muted': False, 'name': 'Connection Failed', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'custom_size': False, 'id_counter': 1, 'items': [{'align': 5, 'bounds': {'x': 1920.0, 'y': 1080.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 1, 'locked': False, 'name': 'Connection Failed Text', 'pos': {'x': 0.0, 'y': 0.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}]}, 'sync': 0, 'versioned_id': 'scene', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'srtla_source', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'SRTLA Camera', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'listen_port': 5050}, 'sync': 0, 'versioned_id': 'srtla_source', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'text_ft2_source_v2', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'Low Signal Strength', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'color1': 4278190335, 'text': 'Low Signal Strength', 'font': {'face': 'Arial', 'size': 128, 'style': 'Bold'}}, 'sync': 0, 'versioned_id': 'text_ft2_source_v2', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'text_ft2_source_v2', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'Connection Failed Text', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'color1': 4278190335, 'text': 'Connection Failed', 'font': {'face': 'Arial', 'size': 256, 'style': 'Bold'}}, 'sync': 0, 'versioned_id': 'text_ft2_source_v2', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'text_ft2_source_v2', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'Current KBPS', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'color1': 4278190335, 'text': '0.0 KBPS', 'font': {'face': 'Arial', 'size': 64, 'style': 'Bold'}}, 'filters': [{'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'srtla_stats_filter', 'mixers': 0, 'monitoring_type': 0, 'muted': False, 'name': 'SRTLA Bitrate Monitor', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'listen_port': 5050}, 'sync': 0, 'versioned_id': 'srtla_stats_filter', 'volume': 1.0}], 'sync': 0, 'versioned_id': 'text_ft2_source_v2', 'volume': 1.0}], 'transition_duration': 300, 'transitions': []}
-        with open(os.path.join(SCENES_DIR, 'PyleDefault.json'), 'w') as f:
-            json.dump(scene_json, f)
-        global_ini_path = os.path.join(OBS_CONFIG_DIR, 'global.ini')
-        config = configparser.ConfigParser(strict=False)
-        config.optionxform = str
-        if os.path.exists(global_ini_path):
-            config.read(global_ini_path)
-        
-        if not config.has_section('General'):
-            config.add_section('General')
-        config.set('General', 'LicenseAccepted', 'true')
-        config.set('General', 'LastVersion', '31.1.1')
-        config.set('General', 'AutoConfigWizardRun', 'true')
-        config.set('General', 'FirstRun', 'false')
-        
-        if not config.has_section('BasicWindow'):
-            config.add_section('BasicWindow')
-            
-        current_profile = config.get('BasicWindow', 'ProfileDir', fallback=None)
-        if not current_profile or current_profile == 'Untitled':
-            config.set('BasicWindow', 'Profile', 'PyleDefault')
-            config.set('BasicWindow', 'ProfileDir', 'PyleDefault')
-            
-        current_scene = config.get('BasicWindow', 'SceneCollection', fallback=None)
-        if not current_scene or current_scene == 'Untitled':
-            config.set('BasicWindow', 'SceneCollection', 'PyleDefault')
-            config.set('BasicWindow', 'SceneCollectionFile', 'PyleDefault')
-            
-        with open(global_ini_path, 'w') as f:
-            config.write(f, space_around_delimiters=False)
-            
-        import shutil
-        untitled_profile = os.path.join(OBS_CONFIG_DIR, 'basic', 'profiles', 'Untitled')
-        untitled_scene = os.path.join(OBS_CONFIG_DIR, 'basic', 'scenes', 'Untitled.json')
-        if os.path.exists(untitled_profile):
-            shutil.rmtree(untitled_profile)
-        if os.path.exists(untitled_scene):
-            os.remove(untitled_scene)
-        PYLE_DEFAULT
-        sed -i 's/^        //' /config/setup-pyle-defaults.py
-        python3 /config/setup-pyle-defaults.py
-        chown -R abc:abc /config/.config/obs-studio/
+              mkdir -p /tmp/pyleirl
 
-        # Force the desktop resolution to 1080p so OBS natively defaults to a 1080p canvas
-        xrandr -s 1920x1080 >/dev/null 2>&1 || true
+              if [ -n "$$DOWNLOAD_URL" ] && [ "$$DOWNLOAD_URL" != "null" ]; then
+                  echo -e "\e[1;33m[DEBUG] Running wget...\e[0m"
+                  wget -O /tmp/pyleirl/plugin.tar.xz "$$DOWNLOAD_URL"
+                  echo -e "\e[1;33m[DEBUG] wget exit code: $$?\e[0m"
+              fi
 
-        # Ensure desktop shortcut exists for future clicks
-        mkdir -p /config/Desktop
-        cat << 'SHORTCUT' > /config/Desktop/obs-studio.desktop
-        [Desktop Entry]
-        Type=Application
-        Exec=obs
-        Icon=obs
-        Name=OBS Studio
-        Terminal=false
-        SHORTCUT
-        chmod +x /config/Desktop/obs-studio.desktop
+              echo -e "\e[1;33m[DEBUG] Checking downloaded file:\e[0m"
+              ls -lh /tmp/pyleirl/plugin.tar.xz || echo -e "\e[1;31m[DEBUG] File not found!\e[0m"
 
-        # Launch OBS Studio and capture all logs!
-        echo -e "\e[1;36m Writing OBS logs to /config/obs-startup.log \e[0m"
-        obs > /config/obs-startup.log 2>&1
-        EOF
-        chmod +x /usr/local/bin/install-obs.sh
+              if [ -s "/tmp/pyleirl/plugin.tar.xz" ]; then
+                  tar -xf /tmp/pyleirl/plugin.tar.xz -C /tmp/pyleirl/
+                  
+                  mkdir -p /config/.config/obs-studio/plugins/PyleIRL/bin/64bit
+                  mkdir -p /config/.config/obs-studio/plugins/PyleIRL/data
+                  
+                  find /tmp/pyleirl -name "*.so" -exec cp -f {} /config/.config/obs-studio/plugins/PyleIRL/bin/64bit/ \;
+                  
+                  # Copy translation/data files if they exist in the extracted folder
+                  if [ -d "/tmp/pyleirl/share/obs/obs-plugins/PyleIRL" ]; then
+                      cp -r /tmp/pyleirl/share/obs/obs-plugins/PyleIRL/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
+                  elif [ -d "/tmp/pyleirl/data" ]; then
+                      cp -r /tmp/pyleirl/data/* /config/.config/obs-studio/plugins/PyleIRL/data/ 2>/dev/null || true
+                  fi
+                  
+                  echo -e "\n\e[1;32m=====================================================================\e[0m"
+                  echo -e "\e[1;32m INSTALLATION COMPLETE! Launching OBS Studio...\e[0m"
+                  echo -e "\e[1;32m=====================================================================\e[0m"
+                  sleep 3
+              else
+                  echo -e "\n\e[1;31m=====================================================================\e[0m"
+                  echo -e "\e[1;31m ERROR: Failed to download plugin release! Check URL.\e[0m"
+                  echo -e "\e[1;31m=====================================================================\e[0m"
+                  sleep 15
+              fi
 
-        # Create an XFCE autostart entry so the terminal automatically pops up on boot
-        mkdir -p /config/.config/autostart /config/Desktop
-        cat << 'EOF' > /config/.config/autostart/obs-installer.desktop
-        [Desktop Entry]
-        Type=Application
-        Exec=xfce4-terminal --command="bash -c '/usr/local/bin/install-obs.sh; exec bash'"
-        Hidden=false
-        Name=OBS Installer
-        X-GNOME-Autostart-enabled=true
-        EOF
+              rm -rf /tmp/pyleirl
 
-        # Create a Desktop shortcut for manual rebuilds
-        cat << 'EOF' > /config/Desktop/rebuild-plugin.desktop
-        [Desktop Entry]
-        Type=Application
-        Exec=xfce4-terminal --command="bash -c '/usr/local/bin/install-obs.sh; exec bash'"
-        Icon=utilities-terminal
-        Name=Rebuild PyleIRL Plugin
-        Terminal=false
-        EOF
-        chmod +x /config/Desktop/rebuild-plugin.desktop
+              # Install obs-shaderfilter plugin
+              SHADER_TAG=$$(curl -sI https://github.com/exeldro/obs-shaderfilter/releases/latest | grep -i '^location:' | sed 's/.*\///' | tr -d '\r' | tr -d '\n')
+              SHADER_DOWNLOAD_URL="https://github.com/exeldro/obs-shaderfilter/releases/download/$${SHADER_TAG}/obs-shaderfilter-$${SHADER_TAG}-ubuntu-22.04.tar.gz"
 
-        # CRITICAL FIX: The previous script ran 'chown abc:abc' before 'abc' existed, 
-        # leaving /config owned by root and completely crashing XFCE! 
-        # Using numerical ID 1000 guarantees perfect permissions.
-        chown -R 1000:1000 /config
+              echo -e "\n\e[1;35m=====================================================================\e[0m"
+              echo -e "\e[1;35m Downloading and installing obs-shaderfilter...\e[0m"
+              echo -e "\e[1;35m=====================================================================\e[0m\n"
 
-        # Start the desktop natively
-        exec /init
-    security_opt:
-      - seccomp:unconfined
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=America/New_York
-      - LIBGL_ALWAYS_SOFTWARE=1 # Required since Hyper-V VM has no GPU
-      - MESA_GL_VERSION_OVERRIDE=3.3 # Force mesa to report OpenGL 3.3 support for OBS
-      - CUSTOM_PORT=3005
-      - CUSTOM_HTTPS_PORT=3006
-      - QT_STYLE_OVERRIDE=Fusion # Fixes invisible checkboxes in KasmVNC
-      - QT_QPA_PLATFORM=xcb
-      - PIXELFLUX_WAYLAND=false # Forces X11 mode to fix missing UI checkboxes
-      - QT_QUICK_BACKEND=software # CRITICAL: Forces Qt6 to use CPU instead of missing GPU for rendering SVG checkboxes!
+              rm -rf /config/.config/obs-studio/plugins/obs-shaderfilter/
+              mkdir -p /tmp/shaderfilter
 
-    volumes:
-      - ./config_debian:/config
-      - ./default_scenes.json:/default_scenes.json:ro
-    network_mode: host
-    restart: unless-stopped
+              if [ -n "$$SHADER_DOWNLOAD_URL" ] && [ "$$SHADER_DOWNLOAD_URL" != "null" ]; then
+                  wget -O /tmp/shaderfilter/plugin.tar.gz "$$SHADER_DOWNLOAD_URL"
+              fi
+
+              if [ -s "/tmp/shaderfilter/plugin.tar.gz" ]; then
+                  tar -xf /tmp/shaderfilter/plugin.tar.gz -C /tmp/shaderfilter/
+                  
+                  mkdir -p /config/.config/obs-studio/plugins/obs-shaderfilter/bin/64bit
+                  mkdir -p /config/.config/obs-studio/plugins/obs-shaderfilter/data
+                  
+                  cp -f /tmp/shaderfilter/obs-shaderfilter/bin/64bit/*.so /config/.config/obs-studio/plugins/obs-shaderfilter/bin/64bit/ 2>/dev/null || true
+                  cp -r /tmp/shaderfilter/obs-shaderfilter/data/* /config/.config/obs-studio/plugins/obs-shaderfilter/data/ 2>/dev/null || true
+                  
+                  echo -e "\e[1;32m obs-shaderfilter installation complete!\e[0m"
+              else
+                  echo -e "\e[1;31m ERROR: Failed to download obs-shaderfilter plugin!\e[0m"
+              fi
+
+              rm -rf /tmp/shaderfilter
+
+              # Install obs-advanced-masks plugin
+              echo -e "\n\e[1;35m=====================================================================\e[0m"
+              echo -e "\e[1;35m Downloading and installing obs-advanced-masks...\e[0m"
+              echo -e "\e[1;35m=====================================================================\e[0m\n"
+
+              MASK_URL=$$(python3 -c "import urllib.request, json; data=json.loads(urllib.request.urlopen('https://api.github.com/repos/FiniteSingularity/obs-advanced-masks/releases/latest').read()); urls=[a['browser_download_url'] for a in data['assets'] if 'ubuntu' in a['name'].lower()]; print(urls[0] if urls else '')")
+
+              rm -rf /config/.config/obs-studio/plugins/obs-advanced-masks/
+              mkdir -p /tmp/advanced-masks
+
+              if [ -n "$$MASK_URL" ]; then
+                  wget -O /tmp/advanced-masks/plugin.zip "$$MASK_URL"
+              fi
+
+              if [ -s "/tmp/advanced-masks/plugin.zip" ]; then
+                  python3 -m zipfile -e /tmp/advanced-masks/plugin.zip /tmp/advanced-masks/
+                  MASK_TAR=$$(ls /tmp/advanced-masks/*.tar.gz 2>/dev/null | head -n 1)
+                  if [ -n "$$MASK_TAR" ]; then
+                      tar -xf "$$MASK_TAR" -C /tmp/advanced-masks/
+                      
+                      mkdir -p /config/.config/obs-studio/plugins/obs-advanced-masks/bin/64bit
+                      mkdir -p /config/.config/obs-studio/plugins/obs-advanced-masks/data
+                      
+                      cp -f /tmp/advanced-masks/obs-advanced-masks/bin/64bit/*.so /config/.config/obs-studio/plugins/obs-advanced-masks/bin/64bit/ 2>/dev/null || true
+                      cp -r /tmp/advanced-masks/obs-advanced-masks/data/* /config/.config/obs-studio/plugins/obs-advanced-masks/data/ 2>/dev/null || true
+                      
+                      echo -e "\e[1;32m obs-advanced-masks installation complete!\e[0m"
+                  else
+                      echo -e "\e[1;31m ERROR: Could not find tar.gz inside the zip!\e[0m"
+                  fi
+              else
+                  echo -e "\e[1;31m ERROR: Failed to download obs-advanced-masks plugin!\e[0m"
+              fi
+
+              rm -rf /tmp/advanced-masks
+
+              # Generate and force PyleDefault Profile and Scene Collection
+              echo -e "\e[1;36m Generating PyleDefault optimized 1080p profile and scenes...\e[0m"
+              cat << 'PYLE_DEFAULT' > /config/setup-pyle-defaults.py
+              import os, json, configparser
+              OBS_CONFIG_DIR = '/config/.config/obs-studio'
+              PROFILES_DIR = os.path.join(OBS_CONFIG_DIR, 'basic', 'profiles', 'PyleDefault')
+              SCENES_DIR = os.path.join(OBS_CONFIG_DIR, 'basic', 'scenes')
+              os.makedirs(PROFILES_DIR, exist_ok=True)
+              os.makedirs(SCENES_DIR, exist_ok=True)
+              basic_ini_content = """[General]
+              Name=PyleDefault
+
+              [Video]
+              BaseCX=1920
+              BaseCY=1080
+              OutputCX=1920
+              OutputCY=1080
+              FPSCommon=60
+
+              [SimpleOutput]
+              VBitrate=4500
+              StreamEncoder=x264
+              Preset=fast
+
+              [SRTLA_AutoSwitch]
+              Enabled=true
+              VisEnabled=true
+              RulesJSON=[{"minKbps":0,"maxKbps":800,"targetScene":"Connection Failed"}]
+              VisibilityRulesJSON=[{"minKbps":800,"maxKbps":1500,"sourceName":"Low Signal Strength"}]
+
+              [SRTLA_WebInterface]
+              Enabled=true
+              Port=5433
+              """
+              with open(os.path.join(PROFILES_DIR, 'basic.ini'), 'w') as f:
+                  f.write(basic_ini_content)
+              scene_json = {'current_program_scene': 'Live', 'current_scene': 'Live', 'current_transition': 'Fade', 'groups': [], 'modules': {}, 'name': 'PyleDefault', 'quick_transitions': [], 'saved_projectors': [], 'scene_order': [{'name': 'Live'}, {'name': 'Connection Failed'}], 'sources': [{'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'scene', 'mixers': 0, 'monitoring_type': 0, 'muted': False, 'name': 'Live', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'custom_size': False, 'id_counter': 3, 'items': [{'align': 5, 'bounds': {'x': 1920.0, 'y': 1080.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 1, 'locked': False, 'name': 'SRTLA Camera', 'pos': {'x': 0.0, 'y': 0.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}, {'align': 5, 'bounds': {'x': 1920.0, 'y': 100.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 2, 'locked': False, 'name': 'Low Signal Strength', 'pos': {'x': 0.0, 'y': 950.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}, {'align': 5, 'bounds': {'x': 1920.0, 'y': 100.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 3, 'locked': False, 'name': 'Current KBPS', 'pos': {'x': 0.0, 'y': 50.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}]}, 'sync': 0, 'versioned_id': 'scene', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'scene', 'mixers': 0, 'monitoring_type': 0, 'muted': False, 'name': 'Connection Failed', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'custom_size': False, 'id_counter': 1, 'items': [{'align': 5, 'bounds': {'x': 1920.0, 'y': 1080.0}, 'bounds_align': 0, 'bounds_type': 2, 'crop_bottom': 0, 'crop_left': 0, 'crop_right': 0, 'crop_top': 0, 'group_item_backup': False, 'id': 1, 'locked': False, 'name': 'Connection Failed Text', 'pos': {'x': 0.0, 'y': 0.0}, 'private_settings': {}, 'rot': 0.0, 'scale': {'x': 1.0, 'y': 1.0}, 'scale_filter': 'disable', 'visible': True}]}, 'sync': 0, 'versioned_id': 'scene', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'srtla_source', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'SRTLA Camera', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'listen_port': 5050}, 'sync': 0, 'versioned_id': 'srtla_source', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'text_ft2_source_v2', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'Low Signal Strength', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'color1': 4278190335, 'text': 'Low Signal Strength', 'font': {'face': 'Arial', 'size': 128, 'style': 'Bold'}}, 'sync': 0, 'versioned_id': 'text_ft2_source_v2', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'text_ft2_source_v2', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'Connection Failed Text', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'color1': 4278190335, 'text': 'Connection Failed', 'font': {'face': 'Arial', 'size': 256, 'style': 'Bold'}}, 'sync': 0, 'versioned_id': 'text_ft2_source_v2', 'volume': 1.0}, {'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'text_ft2_source_v2', 'mixers': 255, 'monitoring_type': 0, 'muted': False, 'name': 'Current KBPS', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'color1': 4278190335, 'text': '0.0 KBPS', 'font': {'face': 'Arial', 'size': 64, 'style': 'Bold'}}, 'filters': [{'balance': 0.5, 'deinterlace_field_order': 0, 'deinterlace_mode': 0, 'enabled': True, 'flags': 0, 'hotkeys': {}, 'id': 'srtla_stats_filter', 'mixers': 0, 'monitoring_type': 0, 'muted': False, 'name': 'SRTLA Bitrate Monitor', 'prev_ver': 503316480, 'private_settings': {}, 'push-to-mute': False, 'push-to-mute-delay': 0, 'push-to-talk': False, 'push-to-talk-delay': 0, 'settings': {'listen_port': 5050}, 'sync': 0, 'versioned_id': 'srtla_stats_filter', 'volume': 1.0}], 'sync': 0, 'versioned_id': 'text_ft2_source_v2', 'volume': 1.0}], 'transition_duration': 300, 'transitions': []}
+              with open(os.path.join(SCENES_DIR, 'PyleDefault.json'), 'w') as f:
+                  json.dump(scene_json, f)
+              global_ini_path = os.path.join(OBS_CONFIG_DIR, 'global.ini')
+              config = configparser.ConfigParser(strict=False)
+              config.optionxform = str
+              if os.path.exists(global_ini_path):
+                  config.read(global_ini_path)
+
+              if not config.has_section('General'):
+                  config.add_section('General')
+              config.set('General', 'LicenseAccepted', 'true')
+              config.set('General', 'LastVersion', '31.1.1')
+              config.set('General', 'AutoConfigWizardRun', 'true')
+              config.set('General', 'FirstRun', 'false')
+
+              if not config.has_section('BasicWindow'):
+                  config.add_section('BasicWindow')
+                  
+              current_profile = config.get('BasicWindow', 'ProfileDir', fallback=None)
+              if not current_profile or current_profile == 'Untitled':
+                  config.set('BasicWindow', 'Profile', 'PyleDefault')
+                  config.set('BasicWindow', 'ProfileDir', 'PyleDefault')
+                  
+              current_scene = config.get('BasicWindow', 'SceneCollection', fallback=None)
+              if not current_scene or current_scene == 'Untitled':
+                  config.set('BasicWindow', 'SceneCollection', 'PyleDefault')
+                  config.set('BasicWindow', 'SceneCollectionFile', 'PyleDefault')
+                  
+              with open(global_ini_path, 'w') as f:
+                  config.write(f, space_around_delimiters=False)
+                  
+              import shutil
+              untitled_profile = os.path.join(OBS_CONFIG_DIR, 'basic', 'profiles', 'Untitled')
+              untitled_scene = os.path.join(OBS_CONFIG_DIR, 'basic', 'scenes', 'Untitled.json')
+              if os.path.exists(untitled_profile):
+                  shutil.rmtree(untitled_profile)
+              if os.path.exists(untitled_scene):
+                  os.remove(untitled_scene)
+              PYLE_DEFAULT
+              sed -i 's/^        //' /config/setup-pyle-defaults.py
+              python3 /config/setup-pyle-defaults.py
+              chown -R abc:abc /config/.config/obs-studio/
+
+              # Force the desktop resolution to 1080p so OBS natively defaults to a 1080p canvas
+              xrandr -s 1920x1080 >/dev/null 2>&1 || true
+
+              # Ensure desktop shortcut exists for future clicks
+              mkdir -p /config/Desktop
+              cat << 'SHORTCUT' > /config/Desktop/obs-studio.desktop
+              [Desktop Entry]
+              Type=Application
+              Exec=obs
+              Icon=obs
+              Name=OBS Studio
+              Terminal=false
+              SHORTCUT
+              chmod +x /config/Desktop/obs-studio.desktop
+
+              # Launch OBS Studio and capture all logs!
+              echo -e "\e[1;36m Writing OBS logs to /config/obs-startup.log \e[0m"
+              obs > /config/obs-startup.log 2>&1
+              EOF
+              chmod +x /usr/local/bin/install-obs.sh
+
+              # Create an XFCE autostart entry so the terminal automatically pops up on boot
+              mkdir -p /config/.config/autostart /config/Desktop
+              cat << 'EOF' > /config/.config/autostart/obs-installer.desktop
+              [Desktop Entry]
+              Type=Application
+              Exec=xfce4-terminal --command="bash -c '/usr/local/bin/install-obs.sh; exec bash'"
+              Hidden=false
+              Name=OBS Installer
+              X-GNOME-Autostart-enabled=true
+              EOF
+
+              # Create a Desktop shortcut for manual rebuilds
+              cat << 'EOF' > /config/Desktop/rebuild-plugin.desktop
+              [Desktop Entry]
+              Type=Application
+              Exec=xfce4-terminal --command="bash -c '/usr/local/bin/install-obs.sh; exec bash'"
+              Icon=utilities-terminal
+              Name=Rebuild PyleIRL Plugin
+              Terminal=false
+              EOF
+              chmod +x /config/Desktop/rebuild-plugin.desktop
+
+              # CRITICAL FIX: The previous script ran 'chown abc:abc' before 'abc' existed, 
+              # leaving /config owned by root and completely crashing XFCE! 
+              # Using numerical ID 1000 guarantees perfect permissions.
+              chown -R 1000:1000 /config
+
+              # Start the desktop natively
+              exec /init
+        security_opt:
+            - seccomp:unconfined
+        environment:
+            - PUID=1000
+            - PGID=1000
+            - TZ=America/New_York
+            - LIBGL_ALWAYS_SOFTWARE=1 # Required since Hyper-V VM has no GPU
+            - MESA_GL_VERSION_OVERRIDE=3.3 # Force mesa to report OpenGL 3.3 support for OBS
+            - CUSTOM_PORT=3005
+            - CUSTOM_HTTPS_PORT=3006
+            - QT_STYLE_OVERRIDE=Fusion # Fixes invisible checkboxes in KasmVNC
+            - QT_QPA_PLATFORM=xcb
+            - PIXELFLUX_WAYLAND=false # Forces X11 mode to fix missing UI checkboxes
+            - QT_QUICK_BACKEND=software # CRITICAL: Forces Qt6 to use CPU instead of missing GPU for rendering SVG checkboxes!
+
+        volumes:
+            - ./config_debian:/config
+            - ./default_scenes.json:/default_scenes.json:ro
+        network_mode: host
+        restart: unless-stopped

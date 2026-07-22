@@ -66,38 +66,8 @@
       "push-to-talk": false,
       "push-to-talk-delay": 0,
       "settings": {
-        "id_counter": 2,
-        "items": [
-          {
-            "align": 5,
-            "bounds": {
-              "x": 0.0,
-              "y": 0.0
-            },
-            "bounds_align": 0,
-            "bounds_type": 0,
-            "crop_bottom": 0,
-            "crop_left": 0,
-            "crop_right": 0,
-            "crop_top": 0,
-            "group_item_backup": false,
-            "id": 2,
-            "locked": false,
-            "name": "Current KBPS",
-            "pos": {
-              "x": 50.0,
-              "y": 50.0
-            },
-            "private_settings": {},
-            "rot": 0.0,
-            "scale": {
-              "x": 1.0,
-              "y": 1.0
-            },
-            "scale_filter": "disable",
-            "visible": true
-          }
-        ]
+        "id_counter": 0,
+        "items": []
       },
       "sync": 0,
       "versioned_id": "scene",
@@ -122,7 +92,7 @@
       "push-to-talk": false,
       "push-to-talk-delay": 0,
       "settings": {
-        "id_counter": 2,
+        "id_counter": 1,
         "items": [
           {
             "align": 5,
@@ -143,35 +113,6 @@
             "pos": {
               "x": 0.0,
               "y": 0.0
-            },
-            "private_settings": {},
-            "rot": 0.0,
-            "scale": {
-              "x": 1.0,
-              "y": 1.0
-            },
-            "scale_filter": "disable",
-            "visible": true
-          },
-          {
-            "align": 5,
-            "bounds": {
-              "x": 0.0,
-              "y": 0.0
-            },
-            "bounds_align": 0,
-            "bounds_type": 0,
-            "crop_bottom": 0,
-            "crop_left": 0,
-            "crop_right": 0,
-            "crop_top": 0,
-            "group_item_backup": false,
-            "id": 2,
-            "locked": false,
-            "name": "Current KBPS",
-            "pos": {
-              "x": 50.0,
-              "y": 50.0
             },
             "private_settings": {},
             "rot": 0.0,
@@ -242,64 +183,6 @@
       },
       "sync": 0,
       "versioned_id": "scene",
-      "volume": 1.0
-    },
-    {
-      "balance": 0.5,
-      "deinterlace_field_order": 0,
-      "deinterlace_mode": 0,
-      "enabled": true,
-      "flags": 0,
-      "hotkeys": {},
-      "id": "text_ft2_source_v2",
-      "mixers": 255,
-      "monitoring_type": 0,
-      "muted": false,
-      "name": "Current KBPS",
-      "prev_ver": 503382019,
-      "private_settings": {},
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "settings": {
-        "color1": 4294967295,
-        "text": "0.0 KBPS",
-        "font": {
-          "face": "Arial",
-          "size": 96,
-          "style": "Bold"
-        }
-      },
-      "filters": [
-        {
-          "balance": 0.5,
-          "deinterlace_field_order": 0,
-          "deinterlace_mode": 0,
-          "enabled": true,
-          "flags": 0,
-          "hotkeys": {},
-          "id": "srtla_stats_filter",
-          "mixers": 0,
-          "monitoring_type": 0,
-          "muted": false,
-          "name": "SRTLA Bitrate Monitor",
-          "prev_ver": 503382019,
-          "private_settings": {},
-          "push-to-mute": false,
-          "push-to-mute-delay": 0,
-          "push-to-talk": false,
-          "push-to-talk-delay": 0,
-          "settings": {
-            "listen_port": 5050
-          },
-          "sync": 0,
-          "versioned_id": "srtla_stats_filter",
-          "volume": 1.0
-        }
-      ],
-      "sync": 0,
-      "versioned_id": "text_ft2_source_v2",
       "volume": 1.0
     }
   ],
