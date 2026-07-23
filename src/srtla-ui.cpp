@@ -932,8 +932,6 @@ SrtlaAutoSwitcher::SrtlaAutoSwitcher(QObject *parent)
 	  currentMatchedRuleIndex(-1),
 	  currentlyAppliedRuleIndex(-1),
 	  matchDurationCounter(0),
-	  currentMatchedVisRuleIndex(-1),
-	  currentlyAppliedVisRuleIndex(-1),
 	  visMatchDurationCounter(0)
 {
 	connect(timer, &QTimer::timeout, this, &SrtlaAutoSwitcher::checkBitrate);
@@ -1017,7 +1015,8 @@ void SrtlaAutoSwitcher::start()
 	currentMatchedRuleIndex = -1;
 	matchDurationCounter = 0;
 
-	currentMatchedVisRuleIndex = -1;
+	currentMatchedVisRules.clear();
+	currentlyAppliedVisRules.clear();
 	visMatchDurationCounter = 0;
 
 	if (!timer->isActive()) {
@@ -1042,7 +1041,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	if ((!enabled || rules.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
 		currentMatchedRuleIndex = -1;
 		matchDurationCounter = 0;
-		currentMatchedVisRuleIndex = -1;
+		currentMatchedVisRules.clear();
 		visMatchDurationCounter = 0;
 		return;
 	}
@@ -1064,7 +1063,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	if (!is_listening) {
 		currentMatchedRuleIndex = -1;
 		matchDurationCounter = 0;
-		currentMatchedVisRuleIndex = -1;
+		currentMatchedVisRules.clear();
 		visMatchDurationCounter = 0;
 		return;
 	}
@@ -1180,17 +1179,16 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 	if (visEnabled && !visibilityRules.isEmpty()) {
 		// Evaluate visibility rules
-		int matchedVisRule = -1;
+		QSet<int> matchedVisRules;
 		for (int i = 0; i < visibilityRules.size(); i++) {
 			if (totalKbps >= visibilityRules[i].minKbps &&
 			    (visibilityRules[i].maxKbps == 0 || totalKbps < visibilityRules[i].maxKbps)) {
-				matchedVisRule = i;
-				break;
+				matchedVisRules.insert(i);
 			}
 		}
 
-		if (matchedVisRule != currentMatchedVisRuleIndex) {
-			currentMatchedVisRuleIndex = matchedVisRule;
+		if (matchedVisRules != currentMatchedVisRules) {
+			currentMatchedVisRules = matchedVisRules;
 			visMatchDurationCounter = 0;
 		}
 
@@ -1206,9 +1204,9 @@ void SrtlaAutoSwitcher::checkBitrate()
 				allRuleSources.insert(r.sourceName);
 			}
 
-			QString sourceToShow = "";
-			if (currentMatchedVisRuleIndex >= 0) {
-				sourceToShow = visibilityRules[currentMatchedVisRuleIndex].sourceName;
+			QSet<QString> sourcesToShow;
+			for (int index : currentMatchedVisRules) {
+				sourcesToShow.insert(visibilityRules[index].sourceName);
 			}
 
 			struct obs_frontend_source_list scenes = {};
@@ -1221,7 +1219,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 						obs_sceneitem_t *item = obs_scene_find_source_recursive(
 							scene, sourceName.toUtf8().constData());
 						if (item) {
-							bool shouldShow = (sourceName == sourceToShow);
+							bool shouldShow = sourcesToShow.contains(sourceName);
 							obs_sceneitem_set_visible(item, shouldShow);
 						}
 					}
@@ -1229,7 +1227,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 			}
 			obs_frontend_source_list_free(&scenes);
 
-			currentlyAppliedVisRuleIndex = currentMatchedVisRuleIndex;
+			currentlyAppliedVisRules = currentMatchedVisRules;
 		}
 	}
 }

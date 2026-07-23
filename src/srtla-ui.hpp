@@ -129,8 +129,8 @@ private:
 	int currentlyAppliedRuleIndex;
 	int matchDurationCounter;
 
-	int currentMatchedVisRuleIndex;
-	int currentlyAppliedVisRuleIndex;
+	QSet<int> currentMatchedVisRules;
+	QSet<int> currentlyAppliedVisRules;
 	int visMatchDurationCounter;
 
 	QString originalSceneName;
