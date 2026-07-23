@@ -242,13 +242,40 @@ services:
                   echo "Categories=Network;" >> /config/Desktop/social-stream-ninja.desktop
                   chmod +x /config/Desktop/social-stream-ninja.desktop
                   
-                  # Create Autostart entry
-                  mkdir -p /config/.config/autostart
-                  cp /config/Desktop/social-stream-ninja.desktop /config/.config/autostart/
+                  # Ensure it is removed from autostart if it was previously copied
+                  rm -f /config/.config/autostart/social-stream-ninja.desktop
                   
                   echo -e "\e[1;32m Social Stream Ninja Desktop installation complete!\e[0m"
               else
                   echo -e "\e[1;31m ERROR: Could not find Social Stream Ninja AppImage URL!\e[0m"
+              fi
+
+              # Install Streamer.bot by default (via Wine)
+              if [ ! -d "/config/.local/lib/streamer.bot" ]; then
+                  echo -e "\n\e[1;35m=====================================================================\e[0m"
+                  echo -e "\e[1;35m Installing Streamer.bot (via Wine)... this may take a few minutes.\e[0m"
+                  echo -e "\e[1;35m=====================================================================\e[0m\n"
+                  
+                  # Install required packages for Wine and Winetricks Quiet Mode
+                  sudo apt-get install -y -qq --no-install-recommends wine winetricks unzip cabextract >/dev/null 2>&1
+                  
+                  mkdir -p /tmp/sb-installer
+                  cd /tmp/sb-installer
+                  wget -q https://raw.githubusercontent.com/Streamerbot/sb-linux-installer/main/install.sh
+                  chmod +x install.sh
+                  
+                  # Run the installer
+                  ./install.sh
+                  
+                  # Copy desktop shortcut to actual Desktop folder
+                  cp /config/.local/share/applications/streamerbot.desktop /config/Desktop/ 2>/dev/null || true
+                  chmod +x /config/Desktop/streamerbot.desktop 2>/dev/null || true
+                  
+                  # Clean up
+                  cd /config
+                  rm -rf /tmp/sb-installer
+                  
+                  echo -e "\e[1;32m Streamer.bot installation complete!\e[0m"
               fi
 
               # Generate and force PyleDefault Profile and Scene Collection
@@ -409,10 +436,23 @@ services:
               if [[ $$exec_found -eq 1 ]]; then
                   exec "$${cmd[@]}"
               else
-                  exit 1
+                  exec /usr/bin/bwrap.real "$$@"
               fi
               BWRAP_EOF
               chmod +x /usr/bin/bwrap
+
+              # CRITICAL FIX 6: Wrapper Chromium/Chrome to run with --no-sandbox automatically inside Docker
+              for browser in chromium chromium-browser google-chrome; do
+                  if command -v $$browser >/dev/null 2>&1; then
+                      REAL_PATH=$$(readlink -f $$(command -v $$browser))
+                      if [ -f "$$REAL_PATH" ] && [ ! -f "$${REAL_PATH}.real" ]; then
+                          mv "$$REAL_PATH" "$${REAL_PATH}.real"
+                           echo '#!/bin/bash' > "$$REAL_PATH"
+                           echo 'exec "$$(dirname "$$0")/$$(basename "$$0").real" --no-sandbox "$$@"' >> "$$REAL_PATH"
+                           chmod +x "$$REAL_PATH"
+                       fi
+                  fi
+              done
 
               # CRITICAL FIX 4: The persistent /config directory contains corrupted XFCE session data from previous crashes!
               # This corrupted state forces xfce4-session to instantly core dump on every fresh boot. We must wipe it!
