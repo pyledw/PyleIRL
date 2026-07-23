@@ -42,9 +42,6 @@ char *srtla_get_frpc_path(void)
 #endif
 }
 
-extern void *create_vertical_dock();
-extern void start_vertical_services();
-
 static void frontend_event_cb(enum obs_frontend_event event, void *private_data)
 {
 	(void)private_data;
@@ -52,9 +49,6 @@ static void frontend_event_cb(enum obs_frontend_event event, void *private_data)
 		setup_srtla_menu();
 		obs_frontend_add_custom_qdock("srtla_status_dock", create_srtla_dock());
 		obs_frontend_add_custom_qdock("srtla_multistream_dock", create_srtla_multistream_dock());
-		obs_frontend_add_custom_qdock("srtla_vertical_dock", create_vertical_dock());
-		
-		start_vertical_services();
 	}
 }
 

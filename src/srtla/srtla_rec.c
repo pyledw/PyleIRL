@@ -148,7 +148,7 @@ Manual testing scenarios:
 } srtla_ack_pkt;
 
 #define MAX_SRTLA_INSTANCES 32
-#include <pthread.h>
+#include "../compat_pthread.h"
 
 typedef struct srtla_ctx {
     int _srtla_sock;

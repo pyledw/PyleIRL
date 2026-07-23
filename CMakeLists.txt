@@ -48,9 +48,6 @@ target_sources(
     src/srtla-ui.cpp
     src/srtla-web.cpp
     src/multistream.cpp
-    src/vertical-manager.cpp
-    src/vertical-render.cpp
-    src/vertical-ui.cpp
     src/resources.qrc
 )
 

@@ -3,6 +3,9 @@
 #include <util/threading.h>
 #include <util/bmem.h>
 #include <util/platform.h>
+#include <util/dstr.h>
+
+#include "compat_pthread.h"
 
 #ifdef _WIN32
 #include <windows.h>

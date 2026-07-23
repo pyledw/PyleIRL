@@ -14,7 +14,6 @@ struct MultistreamTargetConfig {
 	QString url;
 	QString key;
 	bool enabled = true;
-	bool is_vertical = false;
 
 	QJsonObject toJson() const;
 	static MultistreamTargetConfig fromJson(const QJsonObject &obj);
@@ -71,9 +70,6 @@ public:
 	bool getSyncWithObs() const { return syncWithObs; }
 	void setSyncWithObs(bool sync);
 
-	bool getEnableVertical() const { return enableVertical; }
-	void setEnableVertical(bool enable);
-
 	QVector<MultistreamTarget *> getTargets() const { return targets; }
 	MultistreamTarget *getTarget(const QString &id) const;
 
@@ -94,7 +90,6 @@ private:
 
 	QVector<MultistreamTarget *> targets;
 	bool syncWithObs = false;
-	bool enableVertical = false;
 
 	static void obsFrontendEvent(enum obs_frontend_event event, void *private_data);
 };

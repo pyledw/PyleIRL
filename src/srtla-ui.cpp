@@ -1488,9 +1488,7 @@ SrtlaMultistreamDialog::SrtlaMultistreamDialog(QWidget *parent) : QDialog(parent
 	syncWithObsCheck->setChecked(MultistreamManager::instance().getSyncWithObs());
 	mainLayout->addWidget(syncWithObsCheck);
 
-	enableVerticalCheck = new QCheckBox("Enable Native Vertical Canvas (Provides a Vertical Dock and dedicated rendering pipeline)");
-	enableVerticalCheck->setChecked(MultistreamManager::instance().getEnableVertical());
-	mainLayout->addWidget(enableVerticalCheck);
+
 
 	targetsTable = new QTableWidget();
 	targetsTable->setColumnCount(4);
@@ -1590,7 +1588,7 @@ void SrtlaMultistreamDialog::deleteTarget()
 void SrtlaMultistreamDialog::saveSettings()
 {
 	MultistreamManager::instance().setSyncWithObs(syncWithObsCheck->isChecked());
-	MultistreamManager::instance().setEnableVertical(enableVerticalCheck->isChecked());
+
 
 	for (int i = 0; i < targetsTable->rowCount(); i++) {
 		QString id = targetsTable->item(i, 0)->data(Qt::UserRole).toString();

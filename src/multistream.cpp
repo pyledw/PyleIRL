@@ -4,7 +4,6 @@
 #include <QUuid>
 #include <util/config-file.h>
 #include <util/bmem.h>
-#include "vertical-render.hpp"
 
 QJsonObject MultistreamTargetConfig::toJson() const
 {
@@ -15,7 +14,6 @@ QJsonObject MultistreamTargetConfig::toJson() const
 	obj["url"] = url;
 	obj["key"] = key;
 	obj["enabled"] = enabled;
-	obj["is_vertical"] = is_vertical;
 	return obj;
 }
 
@@ -28,7 +26,6 @@ MultistreamTargetConfig MultistreamTargetConfig::fromJson(const QJsonObject &obj
 	c.url = obj["url"].toString();
 	c.key = obj["key"].toString();
 	c.enabled = obj["enabled"].toBool(true);
-	c.is_vertical = obj["is_vertical"].toBool(false);
 	if (c.id.isEmpty()) {
 		c.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
 	}
@@ -124,20 +121,9 @@ bool MultistreamTarget::cloneEncoders()
 	if (!main_output)
 		return false;
 
-	if (config.is_vertical && MultistreamManager::instance().getEnableVertical()) {
-		obs_encoder_t *vert_enc = VerticalRender::instance().getEncoder();
-		if (vert_enc) {
-			obs_output_set_video_encoder(output, vert_enc);
-		} else {
-			// Fallback
-			obs_encoder_t *video_enc = obs_output_get_video_encoder(main_output);
-			if (video_enc) obs_output_set_video_encoder(output, video_enc);
-		}
-	} else {
-		obs_encoder_t *video_enc = obs_output_get_video_encoder(main_output);
-		if (video_enc) {
-			obs_output_set_video_encoder(output, video_enc);
-		}
+	obs_encoder_t *video_enc = obs_output_get_video_encoder(main_output);
+	if (video_enc) {
+		obs_output_set_video_encoder(output, video_enc);
 	}
 
 	// Clone audio encoders (up to max audio mixes)
@@ -270,7 +256,6 @@ void MultistreamManager::loadConfig()
 		return;
 
 	syncWithObs = config_get_bool(global_config, "SRTLA_Multistream", "SyncWithObs");
-	enableVertical = config_get_bool(global_config, "SRTLA_Multistream", "EnableVertical");
 
 	const char *targetsJson = config_get_string(global_config, "SRTLA_Multistream", "Targets");
 	if (targetsJson && *targetsJson) {
@@ -301,7 +286,6 @@ void MultistreamManager::saveConfig()
 		return;
 
 	config_set_bool(global_config, "SRTLA_Multistream", "SyncWithObs", syncWithObs);
-	config_set_bool(global_config, "SRTLA_Multistream", "EnableVertical", enableVertical);
 
 	QJsonArray arr;
 	for (auto t : targets) {
@@ -320,11 +304,6 @@ void MultistreamManager::setSyncWithObs(bool sync)
 	saveConfig();
 }
 
-void MultistreamManager::setEnableVertical(bool enable)
-{
-	enableVertical = enable;
-	saveConfig();
-}
 
 MultistreamTarget *MultistreamManager::getTarget(const QString &id) const
 {
