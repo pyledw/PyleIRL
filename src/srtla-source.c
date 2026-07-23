@@ -5,6 +5,9 @@
 #include <util/platform.h>
 #include <util/dstr.h>
 
+#include <obs-frontend-api.h>
+#include <media-io/audio-io.h>
+
 #include "compat_pthread.h"
 
 #ifdef _WIN32
@@ -38,6 +41,28 @@ static const char *srtla_source_get_name(void *type_data)
 	return "SRTLA Receiver";
 }
 
+static void srtla_audio_capture_cb(void *param, obs_source_t *source, const struct audio_data *audio_data, bool muted)
+{
+	UNUSED_PARAMETER(source);
+	struct srtla_source *context = param;
+	if (muted) return;
+
+	struct obs_audio_info aoi;
+	if (!obs_get_audio_info(&aoi)) return;
+
+	struct obs_source_audio out = {0};
+	out.speakers = aoi.speakers;
+	out.samples_per_sec = aoi.samples_per_sec;
+	out.format = AUDIO_FORMAT_FLOAT_PLANAR;
+	for (int i = 0; i < MAX_AV_PLANES; i++) {
+		out.data[i] = audio_data->data[i];
+	}
+	out.frames = audio_data->frames;
+	out.timestamp = audio_data->timestamp;
+
+	obs_source_output_audio(context->source, &out);
+}
+
 static void *srtla_source_create(obs_data_t *settings, obs_source_t *source)
 {
 	UNUSED_PARAMETER(settings);
@@ -60,28 +85,6 @@ static void srtla_stop_thread(struct srtla_source *context)
 		pthread_join(context->srtla_thread, NULL);
 		context->thread_running = false;
 	}
-}
-
-static void srtla_audio_capture_cb(void *param, obs_source_t *source, const struct audio_data *audio_data, bool muted)
-{
-	UNUSED_PARAMETER(source);
-	struct srtla_source *context = param;
-	if (muted) return;
-
-	struct obs_audio_info aoi;
-	if (!obs_get_audio_info(&aoi)) return;
-
-	struct obs_source_audio out = {0};
-	out.speakers = aoi.speakers;
-	out.samples_per_sec = aoi.samples_per_sec;
-	out.format = AUDIO_FORMAT_FLOAT_PLANAR;
-	for (int i = 0; i < MAX_AV_PLANES; i++) {
-		out.data[i] = audio_data->data[i];
-	}
-	out.frames = audio_data->frames;
-	out.timestamp = audio_data->timestamp;
-
-	obs_source_output_audio(context->source, &out);
 }
 
 static void srtla_source_destroy(void *data)
@@ -248,7 +251,10 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 
 				if (context->media_source) {
 					obs_source_set_audio_mixers(context->media_source, 0);
+					obs_source_set_async_decoupled(context->media_source, true);
+					obs_source_set_async_unbuffered(context->media_source, true);
 					obs_source_add_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
+
 					if (obs_source_active(context->source)) obs_source_inc_active(context->media_source);
 					if (obs_source_showing(context->source)) obs_source_inc_showing(context->media_source);
 				} else {
