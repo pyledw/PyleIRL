@@ -59,7 +59,20 @@ function(_setup_obs_studio)
   elseif(OS_MACOS)
     set(_cmake_generator "Xcode")
     set(_cmake_arch "-DCMAKE_OSX_ARCHITECTURES:STRING=arm64;x86_64")
-    set(_cmake_extra "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    # Get the absolute SDK path to pass to OBS Studio
+    execute_process(
+      COMMAND xcrun --show-sdk-path
+      OUTPUT_VARIABLE _MACOS_SDK_PATH
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+      COMMAND xcrun --show-sdk-version
+      OUTPUT_VARIABLE _MACOS_SDK_VERSION
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    # obs-studio's CMake scripts require the SDK path to explicitly contain the version number
+    string(REPLACE "MacOSX.sdk" "MacOSX${_MACOS_SDK_VERSION}.sdk" _MACOS_SDK_PATH_VERSIONED "${_MACOS_SDK_PATH}")
+    set(_cmake_extra "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}" "-DCMAKE_OSX_SYSROOT=${_MACOS_SDK_PATH_VERSIONED}")
   endif()
 
   message(STATUS "Configure ${label} (${arch})")
