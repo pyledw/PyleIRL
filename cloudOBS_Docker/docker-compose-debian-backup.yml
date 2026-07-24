@@ -226,11 +226,11 @@ services:
         Name=PyleDefault
 
         [Video]
-        BaseCX=1920
-        BaseCY=1080
-        OutputCX=1920
-        OutputCY=1080
-        FPSCommon=60
+        BaseCX=1280
+        BaseCY=720
+        OutputCX=1280
+        OutputCY=720
+        FPSCommon=30
 
         [SimpleOutput]
         VBitrate=4500
@@ -249,7 +249,7 @@ services:
         """
         with open(os.path.join(PROFILES_DIR, 'basic.ini'), 'w') as f:
             f.write(basic_ini_content)
-        scene_json = {"current_program_scene":"Live","current_scene":"Live","current_transition":"Fade","groups":[],"modules":{},"name":"PyleDefault","quick_transitions":[],"saved_projectors":[],"scene_order":[{"name":"Live"},{"name":"Connection Failed"}],"sources":[{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"scene","mixers":0,"monitoring_type":0,"muted":False,"name":"Live","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"custom_size":False,"id_counter":2,"items":[{"align":5,"bounds":{"x":1920.0,"y":1080.0},"bounds_align":0,"bounds_type":2,"crop_bottom":0,"crop_left":0,"crop_right":0,"crop_top":0,"group_item_backup":False,"id":1,"locked":False,"name":"SRTLA Camera","pos":{"x":0.0,"y":0.0},"private_settings":{},"rot":0.0,"scale":{"x":1.0,"y":1.0},"scale_filter":"disable","visible":True},{"align":5,"bounds":{"x":1920.0,"y":100.0},"bounds_align":0,"bounds_type":2,"crop_bottom":0,"crop_left":0,"crop_right":0,"crop_top":0,"group_item_backup":False,"id":2,"locked":False,"name":"Low Signal Strength","pos":{"x":0.0,"y":950.0},"private_settings":{},"rot":0.0,"scale":{"x":1.0,"y":1.0},"scale_filter":"disable","visible":True}]},"sync":0,"versioned_id":"scene","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"scene","mixers":0,"monitoring_type":0,"muted":False,"name":"Connection Failed","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"custom_size":False,"id_counter":1,"items":[{"align":5,"bounds":{"x":1920.0,"y":1080.0},"bounds_align":0,"bounds_type":2,"crop_bottom":0,"crop_left":0,"crop_right":0,"crop_top":0,"group_item_backup":False,"id":1,"locked":False,"name":"Connection Failed Text","pos":{"x":0.0,"y":0.0},"private_settings":{},"rot":0.0,"scale":{"x":1.0,"y":1.0},"scale_filter":"disable","visible":True}]},"sync":0,"versioned_id":"scene","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"srtla_source","mixers":255,"monitoring_type":0,"muted":False,"name":"SRTLA Camera","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"listen_port":5050},"sync":0,"versioned_id":"srtla_source","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"text_ft2_source_v2","mixers":255,"monitoring_type":0,"muted":False,"name":"Low Signal Strength","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"color1":4278190335,"text":"Low Signal Strength","font":{"face":"Arial","size":128,"style":"Bold"}},"sync":0,"versioned_id":"text_ft2_source_v2","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"text_ft2_source_v2","mixers":255,"monitoring_type":0,"muted":False,"name":"Connection Failed Text","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"color1":4278190335,"text":"Connection Failed","font":{"face":"Arial","size":256,"style":"Bold"}},"sync":0,"versioned_id":"text_ft2_source_v2","volume":1.0}],"transition_duration":300,"transitions":[]}
+        scene_json = {"current_program_scene":"Live","current_scene":"Live","current_transition":"Fade","groups":[],"modules":{},"name":"PyleDefault","quick_transitions":[],"saved_projectors":[],"scene_order":[{"name":"Live"},{"name":"Connection Failed"}],"sources":[{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"scene","mixers":0,"monitoring_type":0,"muted":False,"name":"Live","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"custom_size":False,"id_counter":2,"items":[{"align":5,"bounds":{"x":1280.0,"y":720.0},"bounds_align":0,"bounds_type":2,"crop_bottom":0,"crop_left":0,"crop_right":0,"crop_top":0,"group_item_backup":False,"id":1,"locked":False,"name":"SRTLA Camera","pos":{"x":0.0,"y":0.0},"private_settings":{},"rot":0.0,"scale":{"x":1.0,"y":1.0},"scale_filter":"disable","visible":True},{"align":5,"bounds":{"x":1280.0,"y":100.0},"bounds_align":0,"bounds_type":2,"crop_bottom":0,"crop_left":0,"crop_right":0,"crop_top":0,"group_item_backup":False,"id":2,"locked":False,"name":"Low Signal Strength","pos":{"x":0.0,"y":590.0},"private_settings":{},"rot":0.0,"scale":{"x":1.0,"y":1.0},"scale_filter":"disable","visible":True}]},"sync":0,"versioned_id":"scene","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"scene","mixers":0,"monitoring_type":0,"muted":False,"name":"Connection Failed","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"custom_size":False,"id_counter":1,"items":[{"align":5,"bounds":{"x":1280.0,"y":720.0},"bounds_align":0,"bounds_type":2,"crop_bottom":0,"crop_left":0,"crop_right":0,"crop_top":0,"group_item_backup":False,"id":1,"locked":False,"name":"Connection Failed Text","pos":{"x":0.0,"y":0.0},"private_settings":{},"rot":0.0,"scale":{"x":1.0,"y":1.0},"scale_filter":"disable","visible":True}]},"sync":0,"versioned_id":"scene","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"srtla_source","mixers":255,"monitoring_type":0,"muted":False,"name":"SRTLA Camera","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"listen_port":5050},"sync":0,"versioned_id":"srtla_source","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"text_ft2_source_v2","mixers":255,"monitoring_type":0,"muted":False,"name":"Low Signal Strength","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"color1":4278190335,"text":"Low Signal Strength","font":{"face":"Arial","size":128,"style":"Bold"}},"sync":0,"versioned_id":"text_ft2_source_v2","volume":1.0},{"balance":0.5,"deinterlace_field_order":0,"deinterlace_mode":0,"enabled":True,"flags":0,"hotkeys":{},"id":"text_ft2_source_v2","mixers":255,"monitoring_type":0,"muted":False,"name":"Connection Failed Text","prev_ver":503316480,"private_settings":{},"push-to-mute":False,"push-to-mute-delay":0,"push-to-talk":False,"push-to-talk-delay":0,"settings":{"color1":4278190335,"text":"Connection Failed","font":{"face":"Arial","size":256,"style":"Bold"}},"sync":0,"versioned_id":"text_ft2_source_v2","volume":1.0}],"transition_duration":300,"transitions":[]}
         with open(os.path.join(SCENES_DIR, 'PyleDefault.json'), 'w') as f:
             json.dump(scene_json, f)
         global_ini_path = os.path.join(OBS_CONFIG_DIR, 'global.ini')
@@ -268,15 +268,24 @@ services:
         if not config.has_section('BasicWindow'):
             config.add_section('BasicWindow')
             
-        current_profile = config.get('BasicWindow', 'ProfileDir', fallback=None)
-        if not current_profile or current_profile == 'Untitled':
-            config.set('BasicWindow', 'Profile', 'PyleDefault')
-            config.set('BasicWindow', 'ProfileDir', 'PyleDefault')
-            
-        current_scene = config.get('BasicWindow', 'SceneCollection', fallback=None)
-        if not current_scene or current_scene == 'Untitled':
-            config.set('BasicWindow', 'SceneCollection', 'PyleDefault')
-            config.set('BasicWindow', 'SceneCollectionFile', 'PyleDefault')
+        has_other_profiles = False
+        profiles_root = os.path.join(OBS_CONFIG_DIR, 'basic', 'profiles')
+        if os.path.exists(profiles_root):
+            for d in os.listdir(profiles_root):
+                if d not in ('PyleDefault', 'Untitled') and os.path.isdir(os.path.join(profiles_root, d)):
+                    has_other_profiles = True
+                    break
+
+        if not has_other_profiles:
+            current_profile = config.get('BasicWindow', 'ProfileDir', fallback=None)
+            if not current_profile or current_profile == 'Untitled':
+                config.set('BasicWindow', 'Profile', 'PyleDefault')
+                config.set('BasicWindow', 'ProfileDir', 'PyleDefault')
+                
+            current_scene = config.get('BasicWindow', 'SceneCollection', fallback=None)
+            if not current_scene or current_scene == 'Untitled':
+                config.set('BasicWindow', 'SceneCollection', 'PyleDefault')
+                config.set('BasicWindow', 'SceneCollectionFile', 'PyleDefault')
             
         with open(global_ini_path, 'w') as f:
             config.write(f, space_around_delimiters=False)
