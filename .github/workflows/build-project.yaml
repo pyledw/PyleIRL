@@ -91,7 +91,7 @@ jobs:
           if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
           print '::group::Enable Xcode 16.1'
-          sudo xcode-select --switch /Applications/Xcode_16.1.0.app/Contents/Developer
+          sudo xcode-select --switch /Applications/Xcode_16.1.app/Contents/Developer
           print '::endgroup::'
 
           print '::group::Clean Homebrew Environment'
