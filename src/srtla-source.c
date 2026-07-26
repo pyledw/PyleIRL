@@ -253,6 +253,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 					obs_source_set_audio_mixers(context->media_source, 0);
 					obs_source_set_async_decoupled(context->media_source, true);
 					obs_source_set_async_unbuffered(context->media_source, true);
+					obs_source_set_async_unbuffered(context->source, true);
 					obs_source_add_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
 
 					if (obs_source_active(context->source)) obs_source_inc_active(context->media_source);

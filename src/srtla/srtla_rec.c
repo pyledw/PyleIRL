@@ -586,7 +586,15 @@ void handle_srt_data(conn_group_t *g) {
 
   if (g == NULL) return;
 
+  while(1) {
   int n = RECV(g->srt_sock, &buf, MTU, 0);
+  if (n < 0) {
+#ifdef _WIN32
+    if (WSAGetLastError() == WSAEWOULDBLOCK) break;
+#else
+    if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+#endif
+  }
   if (n < SRT_MIN_LEN) {
     if (flag_log_errors) err("Group #%llu (ptr=%p): SRT read failed (err=%s). Entering WAITING_SRT\n", (unsigned long long)g->logical_group_id, g, sock_err_str());
     else err("Group %p: failed to read the SRT sock, entering WAITING_SRT\n", g);
@@ -603,7 +611,7 @@ void handle_srt_data(conn_group_t *g) {
     } else {
       group_destroy(g, NULL);
     }
-    return;
+    break;
   }
 
   // ACK
@@ -645,6 +653,7 @@ void handle_srt_data(conn_group_t *g) {
       }
     }
   }
+  } // end while
 }
 
 void register_packet(conn_group_t *g, conn_t *c, int32_t sn) {
@@ -670,26 +679,32 @@ void handle_srtla_data(time_t ts) {
   char buf[MTU];
   int ret;
 
+  while(1) {
   // Get the packet
   struct sockaddr_storage srtla_addr = {0};
   socklen_t len = sizeof(srtla_addr);
   int n = recvfrom(srtla_sock, buf, MTU, 0, (struct sockaddr*)&srtla_addr, &len);
   if (n < 0) {
+#ifdef _WIN32
+    if (WSAGetLastError() == WSAEWOULDBLOCK) break;
+#else
+    if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+#endif
     err("Failed to read a srtla packet (err=%s)\n", sock_err_str());
-    return;
+    break;
   }
 
   // Handle srtla registration packets
   if (is_srtla_reg1(buf, n)) {
     info("Received REG1 from %s:%d (size %d bytes)\n", print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), n);
     group_reg((struct sockaddr*)&srtla_addr, buf, ts);
-    return;
+    continue;
   }
 
   if (is_srtla_reg2(buf, n)) {
     info("Received REG2 from %s:%d (size %d bytes)\n", print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), n);
     conn_reg((struct sockaddr*)&srtla_addr, buf, ts);
-    return;
+    continue;
   }
 
   // Check that the peer is a member of a connection group, discard otherwise
@@ -702,7 +717,7 @@ void handle_srtla_data(time_t ts) {
       info("Discarding non-SRTLA packet from %s:%d (size %d bytes)\n", print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), n);
       last_log = ts;
     }
-    return;
+    continue;
   }
 
   // Update the connection's use timestamp and bytes received
@@ -717,11 +732,11 @@ void handle_srtla_data(time_t ts) {
       err("%s:%d (group %p): failed to send the srtla keepalive\n",
           print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), g);
     }
-    return;
+    continue;
   }
 
   // Check that the packet is large enough to be an SRT packet, discard otherwise
-  if (n < SRT_MIN_LEN) return;
+  if (n < SRT_MIN_LEN) continue;
 
   // Record the most recently active peer
   memcpy(&g->last_addr, &srtla_addr, sizeof(struct sockaddr_storage));
@@ -735,6 +750,17 @@ void handle_srtla_data(time_t ts) {
   // Open a connection to the SRT server for the group
   if (g->srt_sock < 0) {
     int sock = create_udp_socket();
+#ifdef _WIN32
+    if (sock >= 0) {
+      u_long mode = 1;
+      ioctlsocket(sock, FIONBIO, &mode);
+    }
+#else
+    if (sock >= 0) {
+      int flags = fcntl(sock, F_GETFL, 0);
+      fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+    }
+#endif
     if (sock < 0) {
       err("Group #%llu: failed to create an SRT socket (%s)\n", (unsigned long long)g->logical_group_id, sock_err_str());
       if (flag_auto_reconnect) {
@@ -743,10 +769,10 @@ void handle_srtla_data(time_t ts) {
         uint64_t now = 0; get_ms(&now);
         int backoff = min(flag_reconnect_interval_ms << (g->srt_retry_attempts - 1), REG_RETRY_MAX_MS);
         g->next_srt_retry_ms = now + backoff;
-        return;
+        continue;
       }
       group_destroy(g, NULL);
-      return;
+      continue;
     }
     g->srt_sock = sock;
 
@@ -761,10 +787,10 @@ void handle_srtla_data(time_t ts) {
         uint64_t now = 0; get_ms(&now);
         int backoff = min(flag_reconnect_interval_ms << (g->srt_retry_attempts - 1), REG_RETRY_MAX_MS);
         g->next_srt_retry_ms = now + backoff;
-        return;
+        continue;
       }
       group_destroy(g, NULL);
-      return;
+      continue;
     }
 
 #ifdef __linux__
@@ -777,10 +803,10 @@ void handle_srtla_data(time_t ts) {
         g->state = G_WAITING_SRT;
         uint64_t now = 0; get_ms(&now);
         g->next_srt_retry_ms = now + flag_reconnect_interval_ms;
-        return;
+        continue;
       }
       group_destroy(g, NULL);
-      return;
+      continue;
     }
 #endif
   }
@@ -790,6 +816,7 @@ void handle_srtla_data(time_t ts) {
     err("Group %p: failed to forward the srtla packet, terminating the group\n", g);
     group_destroy(g, NULL);
   }
+  } // end while
 }
 
 /*
@@ -878,6 +905,11 @@ void connection_cleanup(time_t ts) {
               int r = recv(sock, buf, MTU, 0);
               if (r == sizeof(hs_packet)) {
                 // success
+#ifdef _WIN32
+                { u_long mode = 1; ioctlsocket(sock, FIONBIO, &mode); }
+#else
+                { int flags = fcntl(sock, F_GETFL, 0); fcntl(sock, F_SETFL, flags | O_NONBLOCK); }
+#endif
                 g->srt_sock = sock;
                 g->state = G_ACTIVE;
                 g->srt_retry_attempts = 0;
@@ -1120,6 +1152,17 @@ int srtla_rec_main(const char *listen_ip, int srtla_port, const char *srt_host, 
     srtla_sock = -1;
     return -1;
   }
+#ifdef _WIN32
+  {
+    u_long mode = 1;
+    ioctlsocket(srtla_sock, FIONBIO, &mode);
+  }
+#else
+  {
+    int flags = fcntl(srtla_sock, F_GETFL, 0);
+    fcntl(srtla_sock, F_SETFL, flags | O_NONBLOCK);
+  }
+#endif
 
   int optval = 1;
   setsockopt(srtla_sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&optval, sizeof(optval));
