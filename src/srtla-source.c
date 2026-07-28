@@ -28,6 +28,11 @@ struct srtla_source {
 	pthread_t srtla_thread;
 	volatile int stop_flag;
 	bool thread_running;
+	
+	volatile bool needs_restart;
+	
+	uint64_t last_audio_ts;
+	uint64_t last_original_ts;
 
 	struct srtla_source *next;
 };
@@ -58,7 +63,50 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 		out.data[i] = audio_data->data[i];
 	}
 	out.frames = audio_data->frames;
-	out.timestamp = audio_data->timestamp;
+
+	uint64_t now = os_gettime_ns();
+	
+	if (context->last_original_ts == 0) {
+		context->last_original_ts = audio_data->timestamp;
+		context->last_audio_ts = audio_data->timestamp;
+	} else {
+		uint64_t delta = audio_data->timestamp - context->last_original_ts;
+		
+		// If the timestamp jumped backwards, or > 100ms
+		if (delta > 100000000ULL || audio_data->timestamp < context->last_original_ts) {
+			uint64_t chunk_duration = (uint64_t)out.frames * 1000000000ULL / (uint64_t)out.samples_per_sec;
+			context->last_audio_ts += chunk_duration;
+			
+			// If it's a massive gap > 1 second (stream dropped and reconnected)
+			if (delta > 1000000000ULL || audio_data->timestamp < context->last_original_ts) {
+				context->needs_restart = true;
+			}
+		} else {
+			context->last_audio_ts += delta;
+		}
+		context->last_original_ts = audio_data->timestamp;
+	}
+
+	out.timestamp = context->last_audio_ts;
+
+	// Keep the diagnostic logging so we can verify the monotonic timeline
+	static uint64_t last_log_time = 0;
+	static uint64_t last_ts = 0;
+	static int call_count = 0;
+	static int total_frames = 0;
+	
+	call_count++;
+	total_frames += out.frames;
+	uint64_t ts_gap = out.timestamp - last_ts;
+	last_ts = out.timestamp;
+
+	if (now - last_log_time > 1000000000ULL) {
+		obs_log(LOG_INFO, "[SRTLA Audio Diagnostc] 1s Stats | calls: %d | total_frames: %d | last ts_gap: %llu ns | current_ts: %llu | sys_time: %llu",
+			call_count, total_frames, ts_gap, out.timestamp, now);
+		call_count = 0;
+		total_frames = 0;
+		last_log_time = now;
+	}
 
 	obs_source_output_audio(context->source, &out);
 }
@@ -228,7 +276,6 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 					if (obs_source_active(context->source)) obs_source_dec_active(context->media_source);
 					if (obs_source_showing(context->source)) obs_source_dec_showing(context->media_source);
 					obs_source_release(context->media_source);
-					context->media_source = NULL;
 				}
 
 				char url[256];
@@ -250,10 +297,11 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 				obs_data_release(media_settings);
 
 				if (context->media_source) {
-					obs_source_set_audio_mixers(context->media_source, 0);
+					obs_log(LOG_INFO, "[SRTLA Diagnostic] Created internal ffmpeg_source successfully");
 					obs_source_set_async_decoupled(context->media_source, true);
 					obs_source_set_async_unbuffered(context->media_source, true);
-					obs_source_set_async_unbuffered(context->source, true);
+					obs_source_set_audio_mixers(context->media_source, 0);
+					obs_source_set_async_decoupled(context->source, true);
 					obs_source_add_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
 
 					if (obs_source_active(context->source)) obs_source_inc_active(context->media_source);
@@ -279,6 +327,47 @@ static void srtla_source_video_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
 	struct srtla_source *context = data;
+	
+	if (context->needs_restart) {
+		context->needs_restart = false;
+		obs_log(LOG_INFO, "[SRTLA] Massive audio gap detected! Dynamically recreating inner ffmpeg_source to bypass A/V sync poisoning!");
+		
+		if (context->media_source) {
+			obs_source_remove_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
+			if (obs_source_active(context->source)) obs_source_dec_active(context->media_source);
+			if (obs_source_showing(context->source)) obs_source_dec_showing(context->media_source);
+			obs_source_release(context->media_source);
+			context->media_source = NULL;
+		}
+		
+		char url[256];
+		snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener", context->local_srt_port);
+
+		obs_data_t *media_settings = obs_data_create();
+		obs_data_set_string(media_settings, "input", url);
+		obs_data_set_bool(media_settings, "is_local_file", false);
+		obs_data_set_bool(media_settings, "hw_decode", true);
+		obs_data_set_bool(media_settings, "clear_on_media_end", false);
+		obs_data_set_bool(media_settings, "restart_on_activate", true);
+		obs_data_set_int(media_settings, "reconnect_delay_sec", 1);
+
+		char source_name[256];
+		const char *parent_name = obs_source_get_name(context->source);
+		snprintf(source_name, sizeof(source_name), "%s_Internal", parent_name ? parent_name : "SRTLA");
+		context->media_source = obs_source_create_private("ffmpeg_source", source_name, media_settings);
+		obs_data_release(media_settings);
+
+		if (context->media_source) {
+			obs_source_set_async_decoupled(context->media_source, true);
+			obs_source_set_async_unbuffered(context->media_source, true);
+			obs_source_set_audio_mixers(context->media_source, 0);
+			obs_source_add_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
+
+			if (obs_source_active(context->source)) obs_source_inc_active(context->media_source);
+			if (obs_source_showing(context->source)) obs_source_inc_showing(context->media_source);
+		}
+	}
+	
 	if (context->media_source) {
 		obs_source_video_render(context->media_source);
 	}
@@ -343,7 +432,8 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 struct obs_source_info srtla_source_info = {
 	.id = "srtla_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
-	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_CUSTOM_DRAW,
+	.output_flags = OBS_SOURCE_ASYNC_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_CUSTOM_DRAW |
+			OBS_SOURCE_DO_NOT_DUPLICATE,
 	.get_name = srtla_source_get_name,
 	.create = srtla_source_create,
 	.destroy = srtla_source_destroy,
