@@ -405,23 +405,27 @@ int group_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
     goto err;
   }
 
-  // If this remote address is already registered, remove it from the old group
+  // If this remote address or group ID is already registered, destroy the old group completely to free its SRT socket
+  int ret = 0;
   conn_group_t *g = NULL;
-  conn_t *c = NULL;
-  int ret = group_find_by_addr(addr, &g, &c);
-  if (ret != -1 && c != NULL) {
-    info("%s:%d was in old group %p, removing to allow new group registration\n", print_addr(addr), port_no(addr), g);
-    for (conn_t **it = &g->conns; *it != NULL; it = &((*it)->next)) {
-      if (*it == c) {
-        *it = c->next;
-        free(c);
-        break;
-      }
-    }
+  conn_group_t *old_g = NULL;
+  conn_t *old_c = NULL;
+  int find_ret = group_find_by_addr(addr, &old_g, &old_c);
+  if (find_ret != -1 && old_g != NULL) {
+    info("%s:%d was in old group %p (logical #%llu), destroying old group to free SRT socket for new stream\n", 
+         print_addr(addr), port_no(addr), old_g, (unsigned long long)old_g->logical_group_id);
+    group_destroy(old_g, NULL);
+  }
+
+  char *id = in_buf + 2;
+  old_g = group_find_by_id(id);
+  if (old_g != NULL) {
+    info("Group ID already existed in group %p (logical #%llu), destroying old group\n", 
+         old_g, (unsigned long long)old_g->logical_group_id);
+    group_destroy(old_g, NULL);
   }
 
   // Allocate the group
-  char *id = in_buf + 2;
   g = group_create(id, ts);
   if (g == NULL) goto err;
 
@@ -451,8 +455,7 @@ int group_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
   return 0;
 
 err_destroy:
-  groups = g->next;
-  free(g);
+  group_destroy(g, NULL);
 
 err:
   err("%s:%d: group registration failed\n", print_addr(addr), port_no(addr));
@@ -604,10 +607,10 @@ void handle_srt_data(conn_group_t *g) {
     if (flag_auto_reconnect) {
       g->state = G_WAITING_SRT;
       g->srt_retry_attempts++;
-      g->next_srt_retry_ms = time(NULL) * 1000 + flag_reconnect_interval_ms * (1 << (g->srt_retry_attempts - 1));
-      if (g->next_srt_retry_ms - (time(NULL)*1000) > REG_RETRY_MAX_MS) {
-        g->next_srt_retry_ms = time(NULL)*1000 + REG_RETRY_MAX_MS;
-      }
+      uint64_t now = 0; get_ms(&now);
+      int backoff = flag_reconnect_interval_ms * (1 << (g->srt_retry_attempts - 1));
+      if (backoff > REG_RETRY_MAX_MS) backoff = REG_RETRY_MAX_MS;
+      g->next_srt_retry_ms = now + backoff;
     } else {
       group_destroy(g, NULL);
     }
@@ -626,6 +629,10 @@ void handle_srt_data(conn_group_t *g) {
                  print_addr((struct sockaddr*)&c->addr), port_no((struct sockaddr*)&c->addr), g);
       }
     }
+  } else if (is_srt_shutdown(buf, n)) {
+    // Ignore SRT shutdown packets from the local SRT server (OBS)
+    // to prevent the remote SRTLA client from terminating the session when OBS recreates the internal source
+    if (flag_log_errors) info("Group #%llu: Dropped SRT shutdown packet from OBS to keep client connected\n", (unsigned long long)g->logical_group_id);
   } else {
     // send other packets over the most recently used SRTLA connection
     int ret = SENDTO(srtla_sock, &buf, n, 0, (struct sockaddr*)&g->last_addr, sizeof(struct sockaddr_storage));
@@ -813,8 +820,17 @@ void handle_srtla_data(time_t ts) {
 
   ret = send(g->srt_sock, buf, n, 0);
   if (ret != n) {
-    err("Group %p: failed to forward the srtla packet, terminating the group\n", g);
-    group_destroy(g, NULL);
+    if (flag_log_errors) err("Group %llu: failed to forward the srtla packet (%s), entering WAITING_SRT\n", (unsigned long long)g->logical_group_id, sock_err_str());
+    if (g->srt_sock > 0) close_socket(g->srt_sock);
+    g->srt_sock = -1;
+    if (flag_auto_reconnect) {
+      g->state = G_WAITING_SRT;
+      g->srt_retry_attempts = 1;
+      uint64_t now = 0; get_ms(&now);
+      g->next_srt_retry_ms = now + flag_reconnect_interval_ms;
+    } else {
+      group_destroy(g, NULL);
+    }
   }
   } // end while
 }
@@ -1406,5 +1422,19 @@ uint64_t srtla_get_total_bytes(int listen_port) {
     }
     pthread_mutex_unlock(&global_ctx_mutex);
     return total;
+}
+
+int srtla_get_group_count_by_port(int listen_port) {
+    int count = 0;
+    pthread_mutex_lock(&global_ctx_mutex);
+    for (int i = 0; i < MAX_SRTLA_INSTANCES; i++) {
+        srtla_ctx_t *ctx = global_contexts[i];
+        if (ctx && ctx->_listen_port == listen_port) {
+            count = ctx->_group_count;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&global_ctx_mutex);
+    return count;
 }
 

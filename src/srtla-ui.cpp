@@ -34,6 +34,7 @@ void srtla_force_start_by_name(const char *name);
 void srtla_force_stop_by_name(const char *name);
 void srtla_force_restart_by_name(const char *name);
 char *srtla_get_frpc_path(void);
+bool srtla_is_audio_starved(int listen_port);
 }
 
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("SRTLA Status", parent)
@@ -63,7 +64,7 @@ SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("SRTLA Statu
 	line1->setFrameShadow(QFrame::Sunken);
 	mainLayout->addWidget(line1);
 
-	addRow("Active Encoders (Groups):", encodersLabel, mainLayout);
+	addRow("Active Devices (Groups):", encodersLabel, mainLayout);
 	addRow("Active Bonded Connections:", connectionsLabel, mainLayout);
 	addRow("Failed/Dropped Connections:", failedConnectionsLabel, mainLayout);
 
@@ -228,24 +229,37 @@ void SrtlaStatusWidget::updateStatus()
 				QJsonObject gObj = groupsArray[i].toObject();
 				QString groupIdStr = QString::number(gObj["id"].toVariant().toULongLong());
 				QString listenPortStr = QString::number(gObj["listen_port"].toInt());
-				currentGroupIds.insert(groupIdStr);
+				QString uniqueGroupIdStr = listenPortStr + "_" + groupIdStr;
+				currentGroupIds.insert(uniqueGroupIdStr);
 
 				uint64_t gBytes = gObj["bytes"].toVariant().toULongLong();
-				uint64_t gPrevBytes = previousBytes.value(groupIdStr, gBytes);
-				previousBytes[groupIdStr] = gBytes;
+				uint64_t gPrevBytes = previousBytes.value(uniqueGroupIdStr, gBytes);
+				previousBytes[uniqueGroupIdStr] = gBytes;
 
 				double gKbps = ((gBytes - gPrevBytes) * 8.0) / 1000.0 / 0.5; // bits per 0.5s -> kbps
 
-				QString nodeName = "Port " + listenPortStr + " (Encoder #" + groupIdStr + ")";
+				QString nodeName = "Port " + listenPortStr + " (Device #" + groupIdStr + ")";
 
 				QTreeWidgetItem *groupItem = nullptr;
-				QList<QTreeWidgetItem *> found = treeWidget->findItems(nodeName, Qt::MatchExactly, 0);
-				if (!found.isEmpty()) {
-					groupItem = found.first();
-				} else {
+				for (int k = 0; k < treeWidget->topLevelItemCount(); ++k) {
+					if (treeWidget->topLevelItem(k)->data(0, Qt::UserRole).toString() == uniqueGroupIdStr) {
+						groupItem = treeWidget->topLevelItem(k);
+						break;
+					}
+				}
+				
+				if (!groupItem) {
 					groupItem = new QTreeWidgetItem(treeWidget);
-					groupItem->setText(0, nodeName);
+					groupItem->setData(0, Qt::UserRole, uniqueGroupIdStr);
 					groupItem->setExpanded(true);
+				}
+
+				if (srtla_is_audio_starved(listenPortStr.toInt())) {
+					groupItem->setText(0, nodeName + "  [⚠️ BAD AUDIO / OUT OF SYNC]");
+					groupItem->setForeground(0, QBrush(QColor("#F44336"))); // Red
+				} else {
+					groupItem->setText(0, nodeName);
+					groupItem->setForeground(0, QBrush(QColor("#d4d4d4"))); // Default
 				}
 
 				groupItem->setText(1, "-");
@@ -297,15 +311,8 @@ void SrtlaStatusWidget::updateStatus()
 			// Remove disconnected groups
 			for (int i = treeWidget->topLevelItemCount() - 1; i >= 0; i--) {
 				QTreeWidgetItem *item = treeWidget->topLevelItem(i);
-				QString text = item->text(0);
-				int hashIdx = text.indexOf("#");
-				int closeParen = text.indexOf(")");
-				if (hashIdx != -1 && closeParen != -1) {
-					QString idStr = text.mid(hashIdx + 1, closeParen - hashIdx - 1);
-					if (!currentGroupIds.contains(idStr)) {
-						delete treeWidget->takeTopLevelItem(i);
-					}
-				} else {
+				QString uniqueIdStr = item->data(0, Qt::UserRole).toString();
+				if (!currentGroupIds.contains(uniqueIdStr) || uniqueIdStr.isEmpty()) {
 					delete treeWidget->takeTopLevelItem(i);
 				}
 			}
