@@ -541,6 +541,49 @@ void srtla_force_restart_all()
 	free(targets);
 }
 
+void srtla_auto_recover_hung_sources()
+{
+	struct srtla_source **targets = NULL;
+	int count = 0;
+	
+	uint64_t now = os_gettime_ns();
+
+	pthread_mutex_lock(&sources_mutex);
+	for (struct srtla_source *s = sources_head; s; s = s->next) {
+		if (!s->thread_running) continue;
+		
+		int groups = srtla_get_group_count_by_port(s->listen_port);
+		if (groups > 0) {
+			if (s->last_audio_time > 0 && (now - s->last_audio_time > 10000000000ULL)) {
+				obs_log(LOG_WARNING, "[SRTLA] Port %d has active UDP connections but no audio for 10s! Hard resetting hung FFmpeg source.", s->listen_port);
+				s->needs_restart = true;
+				count++;
+			}
+		} else {
+			// If no groups, reset the audio timer so it doesn't instantly restart on first connect
+			s->last_audio_time = 0;
+		}
+	}
+	
+	if (count > 0) {
+		targets = calloc(count, sizeof(struct srtla_source *));
+		int i = 0;
+		for (struct srtla_source *s = sources_head; s; s = s->next) {
+			if (s->needs_restart) {
+				targets[i++] = s;
+				s->needs_restart = false;
+			}
+		}
+	}
+	pthread_mutex_unlock(&sources_mutex);
+
+	for (int i = 0; i < count; i++) {
+		srtla_force_stop(targets[i]);
+		srtla_force_start(targets[i]);
+	}
+	if (targets) free(targets);
+}
+
 void srtla_get_all_receivers_json(char *out_buffer, int max_len)
 {
 	int offset = 0;

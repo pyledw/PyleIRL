@@ -479,21 +479,16 @@ int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
       goto err_early;
     }
     
-    // Group not found, but this is a REG2 packet which contains the full ID!
     // The client is trying to reconnect an existing session that we lost (e.g. because we restarted).
-    // Instead of sending NGP (which the client ignores due to a bug), let's seamlessly recover the session!
-    g = group_create_full(id, ts);
-    if (g == NULL) {
-      uint16_t header = htobe16(SRTLA_TYPE_REG_NGP);
-      int sent = SENDTO(srtla_sock, &header, sizeof(header), 0, addr, sizeof(struct sockaddr_storage));
-      if (sent != sizeof(header)) {
-        err("Failed to send REG_NGP to %s:%d (err=%s)\n", print_addr(addr), port_no(addr), sock_err_str());
-      }
-      goto err_early;
+    // The internal FFmpeg listener has also restarted, so it expects a fresh SRT Handshake (REG1).
+    // We CANNOT seamlessly recover this. We must reject it so the client's SRT layer times out and reconnects.
+    uint16_t header = htobe16(SRTLA_TYPE_REG_NGP);
+    int sent = SENDTO(srtla_sock, &header, sizeof(header), 0, addr, sizeof(struct sockaddr_storage));
+    if (sent != sizeof(header)) {
+      err("Failed to send REG_NGP to %s:%d (err=%s)\n", print_addr(addr), port_no(addr), sock_err_str());
     }
-    
-    group_count++;
-    info("%s:%d: seamlessly recovered lost group #%llu from REG2!\n", print_addr(addr), port_no(addr), (unsigned long long)g->logical_group_id);
+    info("%s:%d: Rejected REG2 for unknown group (forcing client reconnect)\n", print_addr(addr), port_no(addr));
+    goto err_early;
   }
 
   // Check if we should register the connection
@@ -629,10 +624,6 @@ void handle_srt_data(conn_group_t *g) {
                  print_addr((struct sockaddr*)&c->addr), port_no((struct sockaddr*)&c->addr), g);
       }
     }
-  } else if (is_srt_shutdown(buf, n)) {
-    // Ignore SRT shutdown packets from the local SRT server (OBS)
-    // to prevent the remote SRTLA client from terminating the session when OBS recreates the internal source
-    if (flag_log_errors) info("Group #%llu: Dropped SRT shutdown packet from OBS to keep client connected\n", (unsigned long long)g->logical_group_id);
   } else {
     // send other packets over the most recently used SRTLA connection
     int ret = SENDTO(srtla_sock, &buf, n, 0, (struct sockaddr*)&g->last_addr, sizeof(struct sockaddr_storage));
@@ -816,6 +807,12 @@ void handle_srtla_data(time_t ts) {
       continue;
     }
 #endif
+  }
+
+  if (is_srt_shutdown(buf, n)) {
+    // Intercept shutdown packet from client to let OBS naturally drain and play out its buffer
+    info("Group %llu: Intercepted SRT Shutdown from client to let OBS play out buffer\n", (unsigned long long)g->logical_group_id);
+    continue;
   }
 
   ret = send(g->srt_sock, buf, n, 0);

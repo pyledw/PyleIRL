@@ -35,6 +35,7 @@ void srtla_force_stop_by_name(const char *name);
 void srtla_force_restart_by_name(const char *name);
 char *srtla_get_frpc_path(void);
 bool srtla_is_audio_starved(int listen_port);
+void srtla_auto_recover_hung_sources();
 }
 
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("SRTLA Status", parent)
@@ -142,6 +143,8 @@ void SrtlaStatusWidget::updateStatus()
 		char details_buffer[4096] = {0};
 		char receivers_buffer[4096] = {0};
 
+		srtla_auto_recover_hung_sources();
+
 		srtla_get_connection_stats(&is_listening, &groups, &connections);
 		srtla_get_connection_details(&listen_port, &failed_conns, details_buffer, sizeof(details_buffer));
 		srtla_get_all_receivers_json(receivers_buffer, sizeof(receivers_buffer));
@@ -161,45 +164,86 @@ void SrtlaStatusWidget::updateStatus()
 		QJsonDocument rDoc = QJsonDocument::fromJson(QByteArray(receivers_buffer));
 		if (rDoc.isArray()) {
 			QJsonArray rArray = rDoc.array();
-			receiversTable->setRowCount(rArray.size());
+			QSet<QString> currentReceiverNames;
 			for (int i = 0; i < rArray.size(); ++i) {
 				QJsonObject rObj = rArray[i].toObject();
 				QString name = rObj["name"].toString();
 				QString port = QString::number(rObj["listen_port"].toInt());
 				bool running = rObj["running"].toVariant().toBool();
+				
+				currentReceiverNames.insert(name);
 
-				QTableWidgetItem *nameItem = new QTableWidgetItem(name);
-				QTableWidgetItem *portItem = new QTableWidgetItem(port);
-				QTableWidgetItem *statusItem = new QTableWidgetItem(running ? "Running" : "Stopped");
-				statusItem->setForeground(running ? QBrush(QColor("#4CAF50")) : QBrush(QColor("gray")));
+				int foundRow = -1;
+				for (int r = 0; r < receiversTable->rowCount(); ++r) {
+					QTableWidgetItem *item = receiversTable->item(r, 0);
+					if (item && item->text() == name) {
+						foundRow = r;
+						break;
+					}
+				}
 
-				receiversTable->setItem(i, 0, nameItem);
-				receiversTable->setItem(i, 1, portItem);
-				receiversTable->setItem(i, 2, statusItem);
+				if (foundRow == -1) {
+					foundRow = receiversTable->rowCount();
+					receiversTable->insertRow(foundRow);
 
-				// Add action buttons
-				QWidget *actionWidget = new QWidget();
-				QHBoxLayout *actionLayout = new QHBoxLayout(actionWidget);
-				actionLayout->setContentsMargins(2, 2, 2, 2);
+					QTableWidgetItem *nameItem = new QTableWidgetItem(name);
+					QTableWidgetItem *portItem = new QTableWidgetItem(port);
+					QTableWidgetItem *statusItem = new QTableWidgetItem();
+					
+					receiversTable->setItem(foundRow, 0, nameItem);
+					receiversTable->setItem(foundRow, 1, portItem);
+					receiversTable->setItem(foundRow, 2, statusItem);
 
-				QPushButton *startBtn = new QPushButton("Start");
-				QPushButton *stopBtn = new QPushButton("Stop");
-				QPushButton *restartBtn = new QPushButton("Restart");
+					QWidget *actionWidget = new QWidget();
+					QHBoxLayout *actionLayout = new QHBoxLayout(actionWidget);
+					actionLayout->setContentsMargins(2, 2, 2, 2);
 
-				startBtn->setEnabled(!running);
-				stopBtn->setEnabled(running);
+					QPushButton *startBtn = new QPushButton("Start");
+					QPushButton *stopBtn = new QPushButton("Stop");
+					QPushButton *restartBtn = new QPushButton("Restart");
 
-				QObject::connect(startBtn, &QPushButton::clicked,
-						 [name]() { srtla_force_start_by_name(name.toUtf8().constData()); });
-				QObject::connect(stopBtn, &QPushButton::clicked,
-						 [name]() { srtla_force_stop_by_name(name.toUtf8().constData()); });
-				QObject::connect(restartBtn, &QPushButton::clicked,
-						 [name]() { srtla_force_restart_by_name(name.toUtf8().constData()); });
+					startBtn->setObjectName("startBtn");
+					stopBtn->setObjectName("stopBtn");
 
-				actionLayout->addWidget(startBtn);
-				actionLayout->addWidget(stopBtn);
-				actionLayout->addWidget(restartBtn);
-				receiversTable->setCellWidget(i, 3, actionWidget);
+					QObject::connect(startBtn, &QPushButton::clicked,
+							 [name]() { srtla_force_start_by_name(name.toUtf8().constData()); });
+					QObject::connect(stopBtn, &QPushButton::clicked,
+							 [name]() { srtla_force_stop_by_name(name.toUtf8().constData()); });
+					QObject::connect(restartBtn, &QPushButton::clicked,
+							 [name]() { srtla_force_restart_by_name(name.toUtf8().constData()); });
+
+					actionLayout->addWidget(startBtn);
+					actionLayout->addWidget(stopBtn);
+					actionLayout->addWidget(restartBtn);
+					receiversTable->setCellWidget(foundRow, 3, actionWidget);
+				}
+
+				QTableWidgetItem *portItem = receiversTable->item(foundRow, 1);
+				if (portItem) portItem->setText(port);
+
+				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 2);
+				if (statusItem) {
+					statusItem->setText(running ? "Running" : "Stopped");
+					statusItem->setForeground(running ? QBrush(QColor("#4CAF50")) : QBrush(QColor("gray")));
+				}
+
+				QWidget *actionWidget = receiversTable->cellWidget(foundRow, 3);
+				if (actionWidget) {
+					QPushButton *startBtn = actionWidget->findChild<QPushButton*>("startBtn");
+					QPushButton *stopBtn = actionWidget->findChild<QPushButton*>("stopBtn");
+					if (startBtn && stopBtn) {
+						startBtn->setEnabled(!running);
+						stopBtn->setEnabled(running);
+					}
+				}
+			}
+
+			// Remove stale receivers
+			for (int r = receiversTable->rowCount() - 1; r >= 0; r--) {
+				QTableWidgetItem *item = receiversTable->item(r, 0);
+				if (item && !currentReceiverNames.contains(item->text())) {
+					receiversTable->removeRow(r);
+				}
 			}
 		}
 
@@ -232,11 +276,7 @@ void SrtlaStatusWidget::updateStatus()
 				QString uniqueGroupIdStr = listenPortStr + "_" + groupIdStr;
 				currentGroupIds.insert(uniqueGroupIdStr);
 
-				uint64_t gBytes = gObj["bytes"].toVariant().toULongLong();
-				uint64_t gPrevBytes = previousBytes.value(uniqueGroupIdStr, gBytes);
-				previousBytes[uniqueGroupIdStr] = gBytes;
-
-				double gKbps = ((gBytes - gPrevBytes) * 8.0) / 1000.0 / 0.5; // bits per 0.5s -> kbps
+				// gKbps will be calculated by summing the connections
 
 				QString nodeName = "Port " + listenPortStr + " (Device #" + groupIdStr + ")";
 
@@ -263,10 +303,10 @@ void SrtlaStatusWidget::updateStatus()
 				}
 
 				groupItem->setText(1, "-");
-				groupItem->setText(2, QString::number(gKbps, 'f', 1) + " Kbps");
 
 				QJsonArray connsArray = gObj["conns"].toArray();
 				QSet<QString> currentConnIds;
+				double calculatedSumKbps = 0.0;
 
 				for (int j = 0; j < connsArray.size(); j++) {
 					QJsonObject cObj = connsArray[j].toObject();
@@ -277,9 +317,11 @@ void SrtlaStatusWidget::updateStatus()
 
 					uint64_t cBytes = cObj["bytes"].toVariant().toULongLong();
 					uint64_t cPrevBytes = previousBytes.value(connIdStr, cBytes);
+					if (cBytes < cPrevBytes) { cPrevBytes = cBytes; }
 					previousBytes[connIdStr] = cBytes;
 
 					double cKbps = ((cBytes - cPrevBytes) * 8.0) / 1000.0 / 0.5;
+					calculatedSumKbps += cKbps;
 
 					QTreeWidgetItem *connItem = nullptr;
 					for (int k = 0; k < groupItem->childCount(); k++) {
@@ -296,6 +338,8 @@ void SrtlaStatusWidget::updateStatus()
 					}
 					connItem->setText(2, QString::number(cKbps, 'f', 1) + " Kbps");
 				}
+
+				groupItem->setText(2, QString::number(calculatedSumKbps, 'f', 1) + " Kbps");
 
 				// Remove disconnected children
 				for (int k = groupItem->childCount() - 1; k >= 0; k--) {
@@ -1086,13 +1130,25 @@ void SrtlaAutoSwitcher::checkBitrate()
 			QJsonObject gObj = groupsArray[i].toObject();
 			QString groupIdStr = QString::number(gObj["id"].toVariant().toULongLong());
 
-			uint64_t gBytes = gObj["bytes"].toVariant().toULongLong();
-			uint64_t gPrevBytes = previousBytes.value(groupIdStr, gBytes);
-			previousBytes[groupIdStr] = gBytes;
+			QJsonArray connsArray = gObj["conns"].toArray();
+			double calculatedSumKbps = 0.0;
+			for (int j = 0; j < connsArray.size(); j++) {
+				QJsonObject cObj = connsArray[j].toObject();
+				QString ip = cObj["ip"].toString();
+				QString port = QString::number(cObj["port"].toInt());
+				QString connIdStr = groupIdStr + "_" + ip + ":" + port;
 
-			// We check every 1 second here
-			double gKbps = ((gBytes - gPrevBytes) * 8.0) / 1000.0 / 1.0;
-			totalKbps += gKbps;
+				uint64_t cBytes = cObj["bytes"].toVariant().toULongLong();
+				uint64_t cPrevBytes = previousBytes.value(connIdStr, cBytes);
+				if (cBytes < cPrevBytes) { cPrevBytes = cBytes; }
+				previousBytes[connIdStr] = cBytes;
+
+				// We check every 1 second here
+				double cKbps = ((cBytes - cPrevBytes) * 8.0) / 1000.0 / 1.0;
+				calculatedSumKbps += cKbps;
+			}
+			
+			totalKbps += calculatedSumKbps;
 			activeGroupsWithData++;
 		}
 	}
