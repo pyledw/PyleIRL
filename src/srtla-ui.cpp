@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QTextBrowser>
 #include <QCheckBox>
+#include <QListWidget>
 #include "multistream.hpp"
 
 #include <QDesktopServices>
@@ -33,6 +34,8 @@ void srtla_get_all_receivers_json(char *out_buffer, int max_len);
 void srtla_force_start_by_name(const char *name);
 void srtla_force_stop_by_name(const char *name);
 void srtla_force_restart_by_name(const char *name);
+void srtla_force_reload_by_name(const char *name);
+void srtla_force_reload_all();
 char *srtla_get_frpc_path(void);
 bool srtla_is_audio_starved(int listen_port);
 void srtla_auto_recover_hung_sources();
@@ -201,9 +204,13 @@ void SrtlaStatusWidget::updateStatus()
 					QPushButton *startBtn = new QPushButton("Start");
 					QPushButton *stopBtn = new QPushButton("Stop");
 					QPushButton *restartBtn = new QPushButton("Restart");
+					QPushButton *fixBtn = new QPushButton("Fix Audio");
 
 					startBtn->setObjectName("startBtn");
 					stopBtn->setObjectName("stopBtn");
+					restartBtn->setObjectName("restartBtn");
+					fixBtn->setObjectName("fixBtn");
+					fixBtn->setToolTip("Rapidly reload the internal player to clear audio lag / desync without dropping the SRTLA connection");
 
 					QObject::connect(startBtn, &QPushButton::clicked,
 							 [name]() { srtla_force_start_by_name(name.toUtf8().constData()); });
@@ -211,10 +218,13 @@ void SrtlaStatusWidget::updateStatus()
 							 [name]() { srtla_force_stop_by_name(name.toUtf8().constData()); });
 					QObject::connect(restartBtn, &QPushButton::clicked,
 							 [name]() { srtla_force_restart_by_name(name.toUtf8().constData()); });
+					QObject::connect(fixBtn, &QPushButton::clicked,
+							 [name]() { srtla_force_reload_by_name(name.toUtf8().constData()); });
 
 					actionLayout->addWidget(startBtn);
 					actionLayout->addWidget(stopBtn);
 					actionLayout->addWidget(restartBtn);
+					actionLayout->addWidget(fixBtn);
 					receiversTable->setCellWidget(foundRow, 3, actionWidget);
 				}
 
@@ -231,10 +241,14 @@ void SrtlaStatusWidget::updateStatus()
 				if (actionWidget) {
 					QPushButton *startBtn = actionWidget->findChild<QPushButton*>("startBtn");
 					QPushButton *stopBtn = actionWidget->findChild<QPushButton*>("stopBtn");
+					QPushButton *restartBtn = actionWidget->findChild<QPushButton*>("restartBtn");
+					QPushButton *fixBtn = actionWidget->findChild<QPushButton*>("fixBtn");
 					if (startBtn && stopBtn) {
 						startBtn->setEnabled(!running);
 						stopBtn->setEnabled(running);
 					}
+					if (restartBtn) restartBtn->setEnabled(running);
+					if (fixBtn) fixBtn->setEnabled(running);
 				}
 			}
 
@@ -745,6 +759,15 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	sceneLayout->addRow(rulesTable);
 	sceneLayout->addRow(addRuleBtn);
 
+	noFailoverList = new QListWidget();
+	noFailoverList->setMaximumHeight(120);
+	for (const QString &sceneName : availableScenes) {
+		QListWidgetItem *item = new QListWidgetItem(sceneName, noFailoverList);
+		item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+		item->setCheckState(Qt::Unchecked);
+	}
+	sceneLayout->addRow("No Failover Scenes:\n(Auto-switch inactive on these scenes)", noFailoverList);
+
 	tabs->addTab(sceneTab, "Scene Switching");
 
 	QWidget *visTab = new QWidget();
@@ -819,6 +842,24 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 					QJsonObject obj = arr[i].toObject();
 					addRuleRow(obj["minKbps"].toInt(), obj["maxKbps"].toInt(),
 						   obj["targetScene"].toString());
+				}
+			}
+		}
+
+		const char *noFailoverJson = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
+		if (noFailoverJson && *noFailoverJson) {
+			QJsonDocument doc = QJsonDocument::fromJson(QByteArray(noFailoverJson));
+			if (doc.isArray()) {
+				QJsonArray arr = doc.array();
+				QSet<QString> savedNoFailover;
+				for (int i = 0; i < arr.size(); i++) {
+					savedNoFailover.insert(arr[i].toString());
+				}
+				for (int i = 0; i < noFailoverList->count(); i++) {
+					QListWidgetItem *item = noFailoverList->item(i);
+					if (item && savedNoFailover.contains(item->text())) {
+						item->setCheckState(Qt::Checked);
+					}
 				}
 			}
 		}
@@ -949,6 +990,18 @@ void SrtlaAutoSwitchDialog::saveSettings()
 
 		config_set_string(global_config, "SRTLA_AutoSwitch", "RulesJSON", jsonString.toUtf8().constData());
 
+		QJsonArray noFailoverArr;
+		for (int i = 0; i < noFailoverList->count(); i++) {
+			QListWidgetItem *item = noFailoverList->item(i);
+			if (item && item->checkState() == Qt::Checked) {
+				noFailoverArr.append(item->text());
+			}
+		}
+		QJsonDocument noFailoverDoc(noFailoverArr);
+		QString noFailoverJsonString = noFailoverDoc.toJson(QJsonDocument::Compact);
+		config_set_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes",
+				  noFailoverJsonString.toUtf8().constData());
+
 		QJsonArray visArr;
 		for (int i = 0; i < visibilityRulesTable->rowCount(); i++) {
 			QSpinBox *minSp = qobject_cast<QSpinBox *>(visibilityRulesTable->cellWidget(i, 0));
@@ -1023,6 +1076,7 @@ void SrtlaAutoSwitcher::loadRules()
 {
 	rules.clear();
 	visibilityRules.clear();
+	noFailoverScenes.clear();
 
 	config_t *global_config = obs_frontend_get_profile_config();
 	if (global_config) {
@@ -1038,6 +1092,17 @@ void SrtlaAutoSwitcher::loadRules()
 					r.maxKbps = obj["maxKbps"].toInt();
 					r.targetScene = obj["targetScene"].toString();
 					rules.append(r);
+				}
+			}
+		}
+
+		const char *noFailoverJson = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
+		if (noFailoverJson && *noFailoverJson) {
+			QJsonDocument doc = QJsonDocument::fromJson(QByteArray(noFailoverJson));
+			if (doc.isArray()) {
+				QJsonArray arr = doc.array();
+				for (int i = 0; i < arr.size(); i++) {
+					noFailoverScenes.insert(arr[i].toString());
 				}
 			}
 		}
@@ -1160,82 +1225,100 @@ void SrtlaAutoSwitcher::checkBitrate()
 	}
 
 	if (enabled && !rules.isEmpty()) {
-		// Find matching rule
-		int matchedRule = -1;
-		for (int i = 0; i < rules.size(); i++) {
-			if (totalKbps >= rules[i].minKbps && (rules[i].maxKbps == 0 || totalKbps < rules[i].maxKbps)) {
-				matchedRule = i;
-				break; // Stop at first match
+		obs_source_t *currentScene = obs_frontend_get_current_scene();
+		QString currentSceneName;
+		if (currentScene) {
+			const char *currentName = obs_source_get_name(currentScene);
+			if (currentName) {
+				currentSceneName = QString::fromUtf8(currentName);
 			}
+			obs_source_release(currentScene);
 		}
 
-		if (matchedRule != currentMatchedRuleIndex) {
-			// Bitrate changed to a different rule range (or outside all ranges)
-			currentMatchedRuleIndex = matchedRule;
+		if (noFailoverScenes.contains(currentSceneName)) {
+			// Current scene is marked as No Failover: auto scene switching is disabled
+			currentMatchedRuleIndex = -1;
 			matchDurationCounter = 0;
-		}
-
-		if (currentMatchedRuleIndex >= 0) {
-			matchDurationCounter++;
-			if (matchDurationCounter >= delay && currentMatchedRuleIndex != currentlyAppliedRuleIndex) {
-				// Apply rule
-				const AutoSwitchRule &rule = rules[currentMatchedRuleIndex];
-
-				// Build target scenes set to check if current scene is a primary scene
-				QSet<QString> targetScenes;
-				for (const auto &r : rules) {
-					targetScenes.insert(r.targetScene);
+			currentlyAppliedRuleIndex = -1;
+			originalSceneName = "";
+		} else {
+			// Find matching rule
+			int matchedRule = -1;
+			for (int i = 0; i < rules.size(); i++) {
+				if (totalKbps >= rules[i].minKbps && (rules[i].maxKbps == 0 || totalKbps < rules[i].maxKbps)) {
+					matchedRule = i;
+					break; // Stop at first match
 				}
+			}
 
-				obs_source_t *currentScene = obs_frontend_get_current_scene();
-				if (currentScene) {
-					const char *currentName = obs_source_get_name(currentScene);
-					if (currentName) {
-						QString currentNameStr = QString::fromUtf8(currentName);
-						if (currentNameStr != rule.targetScene) {
-							if (!targetScenes.contains(currentNameStr) &&
-							    originalSceneName.isEmpty()) {
-								// Only save the original scene if it's a primary scene (not in targetScenes)
-								originalSceneName = currentNameStr;
-							}
+			if (matchedRule != currentMatchedRuleIndex) {
+				// Bitrate changed to a different rule range (or outside all ranges)
+				currentMatchedRuleIndex = matchedRule;
+				matchDurationCounter = 0;
+			}
 
-							obs_source_t *targetSceneSrc = obs_get_source_by_name(
-								rule.targetScene.toUtf8().constData());
-							if (targetSceneSrc) {
-								obs_frontend_set_current_scene(targetSceneSrc);
-								obs_source_release(targetSceneSrc);
+			if (currentMatchedRuleIndex >= 0) {
+				matchDurationCounter++;
+				if (matchDurationCounter >= delay && currentMatchedRuleIndex != currentlyAppliedRuleIndex) {
+					// Apply rule
+					const AutoSwitchRule &rule = rules[currentMatchedRuleIndex];
+
+					// Build target scenes set to check if current scene is a primary scene
+					QSet<QString> targetScenes;
+					for (const auto &r : rules) {
+						targetScenes.insert(r.targetScene);
+					}
+
+					obs_source_t *currScene = obs_frontend_get_current_scene();
+					if (currScene) {
+						const char *currName = obs_source_get_name(currScene);
+						if (currName) {
+							QString currNameStr = QString::fromUtf8(currName);
+							if (currNameStr != rule.targetScene) {
+								if (!targetScenes.contains(currNameStr) &&
+								    originalSceneName.isEmpty()) {
+									// Only save the original scene if it's a primary scene (not in targetScenes)
+									originalSceneName = currNameStr;
+								}
+
+								obs_source_t *targetSceneSrc = obs_get_source_by_name(
+									rule.targetScene.toUtf8().constData());
+								if (targetSceneSrc) {
+									obs_frontend_set_current_scene(targetSceneSrc);
+									obs_source_release(targetSceneSrc);
+									currentlyAppliedRuleIndex = currentMatchedRuleIndex;
+								}
+							} else {
+								// Already on the target scene, just update index
 								currentlyAppliedRuleIndex = currentMatchedRuleIndex;
 							}
-						} else {
-							// Already on the target scene, just update index
-							currentlyAppliedRuleIndex = currentMatchedRuleIndex;
 						}
+						obs_source_release(currScene);
 					}
-					obs_source_release(currentScene);
 				}
-			}
-		} else {
-			// No rules match (bitrate is outside of all configured low-bitrate ranges, i.e., recovered)
+			} else {
+				// No rules match (bitrate is outside of all configured low-bitrate ranges, i.e., recovered)
 
-			int recoveryDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay");
-			if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "RecoveryDelay")) {
-				recoveryDelay = 4;
-			}
-			
-			int totalRecoveryDelay = delay + recoveryDelay;
+				int recoveryDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay");
+				if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "RecoveryDelay")) {
+					recoveryDelay = 4;
+				}
+				
+				int totalRecoveryDelay = delay + recoveryDelay;
 
-			matchDurationCounter++;
-			if (matchDurationCounter >= totalRecoveryDelay && currentlyAppliedRuleIndex != -1) {
-				if (!originalSceneName.isEmpty()) {
-					obs_source_t *prevSceneSrc =
-						obs_get_source_by_name(originalSceneName.toUtf8().constData());
-					if (prevSceneSrc) {
-						obs_frontend_set_current_scene(prevSceneSrc);
-						obs_source_release(prevSceneSrc);
+				matchDurationCounter++;
+				if (matchDurationCounter >= totalRecoveryDelay && currentlyAppliedRuleIndex != -1) {
+					if (!originalSceneName.isEmpty()) {
+						obs_source_t *prevSceneSrc =
+							obs_get_source_by_name(originalSceneName.toUtf8().constData());
+						if (prevSceneSrc) {
+							obs_frontend_set_current_scene(prevSceneSrc);
+							obs_source_release(prevSceneSrc);
+						}
+						originalSceneName = "";
 					}
-					originalSceneName = "";
+					currentlyAppliedRuleIndex = -1;
 				}
-				currentlyAppliedRuleIndex = -1;
 			}
 		}
 	}

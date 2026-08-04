@@ -303,8 +303,10 @@ static void handle_api_autoswitch_get(const httplib::Request &req, httplib::Resp
 	QJsonObject obj;
 	if (global_config) {
 		const char *rules = config_get_string(global_config, "SRTLA_AutoSwitch", "RulesJSON");
+		const char *noFailover = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
 		const char *visRules = config_get_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON");
 		obj["rules"] = rules ? QString(rules) : "[]";
+		obj["no_failover_scenes"] = noFailover ? QString(noFailover) : "[]";
 		obj["visibility_rules"] = visRules ? QString(visRules) : "[]";
 		obj["delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "Delay"));
 		obj["vis_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay"));
@@ -328,6 +330,9 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 		if (obj.contains("rules"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "RulesJSON",
 					  obj["rules"].toString().toUtf8().constData());
+		if (obj.contains("no_failover_scenes"))
+			config_set_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes",
+					  obj["no_failover_scenes"].toString().toUtf8().constData());
 		if (obj.contains("visibility_rules"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON",
 					  obj["visibility_rules"].toString().toUtf8().constData());

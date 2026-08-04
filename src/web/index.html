@@ -310,6 +310,10 @@
             </table>
         </div>
         <div class="panel">
+            <h2>No Failover Scenes <small style="font-size:12px; color:var(--text-muted); font-weight:normal;">(Auto-switching will be ignored while on these scenes)</small></h2>
+            <div id="no-failover-scenes-list" style="display:flex; flex-direction:column; gap:6px; max-height:150px; overflow-y:auto; padding:8px; background:rgba(0,0,0,0.2); border-radius:4px;"></div>
+        </div>
+        <div class="panel">
             <h2>Source Visibility Rules <button style="float:right; padding:5px 10px;" onclick="addVisAutoSwitchRule()">+ Add</button></h2>
             <table id="vis-rules-table">
                 <tr><th>Min Kbps</th><th>Max Kbps</th><th>Target Source</th><th></th></tr>
@@ -1036,8 +1040,31 @@
         }
 
         let cachedSources = [];
+        let cachedNoFailoverScenes = [];
+
+        function renderNoFailoverScenes() {
+            const container = document.getElementById('no-failover-scenes-list');
+            if (!container) return;
+            container.innerHTML = "";
+            if (!cachedScenes || cachedScenes.length === 0) {
+                container.innerHTML = '<span style="color:var(--text-muted); font-size:13px;">No scenes available</span>';
+                return;
+            }
+            cachedScenes.forEach(s => {
+                const isChecked = cachedNoFailoverScenes.includes(s.sceneName) ? "checked" : "";
+                const lbl = document.createElement('label');
+                lbl.style.display = "flex";
+                lbl.style.alignItems = "center";
+                lbl.style.gap = "8px";
+                lbl.style.cursor = "pointer";
+                lbl.style.fontSize = "13px";
+                lbl.innerHTML = `<input type="checkbox" class="no-failover-cb" value="${s.sceneName}" ${isChecked}> <span>${s.sceneName}</span>`;
+                container.appendChild(lbl);
+            });
+        }
 
         function updateDropdowns() {
+            renderNoFailoverScenes();
             document.querySelectorAll('.rscene').forEach(sel => {
                 const currentVal = sel.value || sel.getAttribute('data-val');
                 sel.innerHTML = "";
@@ -1074,6 +1101,9 @@
             while(table.rows.length > 1) table.deleteRow(1);
             rules.forEach(r => addAutoSwitchRule(r.minKbps, r.maxKbps, r.targetScene));
             
+            cachedNoFailoverScenes = JSON.parse(data.no_failover_scenes || "[]");
+            renderNoFailoverScenes();
+
             const visRules = JSON.parse(data.visibility_rules || "[]");
             const visTable = document.getElementById('vis-rules-table');
             while(visTable.rows.length > 1) visTable.deleteRow(1);
@@ -1116,6 +1146,12 @@
                     targetScene: row.querySelector('.rscene').value
                 });
             });
+
+            const noFailover = [];
+            document.querySelectorAll('.no-failover-cb:checked').forEach(cb => {
+                noFailover.push(cb.value);
+            });
+            cachedNoFailoverScenes = noFailover;
             
             const visRules = [];
             document.querySelectorAll('#vis-rules-table tr').forEach((row, i) => {
@@ -1131,6 +1167,7 @@
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     rules: JSON.stringify(rules),
+                    no_failover_scenes: JSON.stringify(noFailover),
                     visibility_rules: JSON.stringify(visRules)
                 })
             });

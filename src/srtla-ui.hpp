@@ -71,6 +71,8 @@ struct SourceVisibilityRule {
 	QString sourceName;
 };
 
+class QListWidget;
+
 class SrtlaAutoSwitchDialog : public QDialog {
 	Q_OBJECT
 
@@ -87,6 +89,7 @@ private:
 	QSpinBox *switchDelay;
 	QSpinBox *recoveryDelay;
 	QTableWidget *rulesTable;
+	QListWidget *noFailoverList;
 
 	QComboBox *enableVisSwitch;
 	QSpinBox *visSwitchDelay;
@@ -125,6 +128,7 @@ private:
 
 	QVector<AutoSwitchRule> rules;
 	QVector<SourceVisibilityRule> visibilityRules;
+	QSet<QString> noFailoverScenes;
 	int currentMatchedRuleIndex;
 	int currentlyAppliedRuleIndex;
 	int matchDurationCounter;
