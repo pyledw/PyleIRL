@@ -143,6 +143,8 @@ int is_srtla_reg1(void *pkt, int len);
 int is_srtla_reg2(void *pkt, int len);
 int is_srtla_reg3(void *pkt, int len);
 
+void srtla_reset_group_by_port(int listen_port);
+
 #ifdef _WIN32
 // Windows için byte order makroları
 #include <winsock2.h>

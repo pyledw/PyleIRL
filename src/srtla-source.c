@@ -17,6 +17,13 @@
 extern int srtla_rec_main(const char *listen_ip, int listen_port, const char *srt_host, int srt_port,
 			  volatile int *stop_flag);
 extern int srtla_get_group_count_by_port(int listen_port);
+extern void srtla_reset_group_by_port(int listen_port);
+
+enum srtla_recovery_action {
+	RECOVERY_NONE = 0,
+	RECOVERY_RELOAD,
+	RECOVERY_RESTART
+};
 
 struct srtla_source {
 	obs_source_t *source;
@@ -32,13 +39,16 @@ struct srtla_source {
 	bool thread_running;
 	bool was_connected;
 	
-	volatile bool needs_restart;
+	enum srtla_recovery_action pending_recovery;
 	
 	uint64_t last_audio_ts;
 	uint64_t last_original_ts;
 	
 	uint64_t last_audio_time;
+	uint64_t connected_since;
 	uint64_t starved_since;
+	uint64_t last_recovery_time;
+	int recovery_attempts;
 	double current_stream_hz;
 	uint64_t ts_window_start;
 	uint64_t frames_in_window;
@@ -58,10 +68,21 @@ bool srtla_is_audio_starved(int listen_port) {
 	bool starved = false;
 	while (curr) {
 		if (curr->listen_port == listen_port) {
-			uint64_t now = os_gettime_ns();
-			// If we haven't received audio recently, or if the monitored hz is below 40kHz
-			if (curr->last_audio_time > 0 && now - curr->last_audio_time < 2000000000ULL) {
-				if (curr->current_stream_hz > 0 && curr->current_stream_hz < 40000.0) {
+			int groups = srtla_get_group_count_by_port(curr->listen_port);
+			if (groups > 0) {
+				uint64_t now = os_gettime_ns();
+				// 1. Connected for >3s but zero audio packets ever received
+				if (curr->last_audio_time == 0) {
+					if (curr->connected_since > 0 && (now - curr->connected_since >= 3000000000ULL)) {
+						starved = true;
+					}
+				}
+				// 2. Audio stopped receiving for >= 2s
+				else if (now - curr->last_audio_time >= 2000000000ULL) {
+					starved = true;
+				}
+				// 3. Audio actively receiving but starved / degraded (< 40kHz)
+				else if (curr->current_stream_hz > 0 && curr->current_stream_hz < 40000.0) {
 					starved = true;
 				}
 			}
@@ -98,9 +119,30 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	out.frames = audio_data->frames;
 
 	uint64_t now = os_gettime_ns();
-	out.timestamp = audio_data->timestamp;
-	
 	context->last_audio_time = now;
+	context->recovery_attempts = 0;
+
+	// Monotonic sample-accurate timestamp smoothing to eliminate jitter-induced drops in OBS
+	uint64_t sample_rate = (out.samples_per_sec > 0) ? (uint64_t)out.samples_per_sec : 48000ULL;
+	uint64_t frame_duration_ns = ((uint64_t)out.frames * 1000000000ULL) / sample_rate;
+
+	if (context->last_audio_ts == 0) {
+		context->last_audio_ts = audio_data->timestamp;
+		context->last_original_ts = audio_data->timestamp;
+	} else {
+		uint64_t expected_ts = context->last_audio_ts + frame_duration_ns;
+		int64_t drift = (int64_t)audio_data->timestamp - (int64_t)expected_ts;
+		
+		// If drift is within +/-50ms, gently nudge towards source clock without causing pitch or audio drop glitches
+		if (drift > -50000000LL && drift < 50000000LL) {
+			expected_ts += (drift / 32);
+		} else {
+			// Large PTS discontinuity / resync (e.g. stream reconnect): jump directly to new timestamp
+			expected_ts = audio_data->timestamp;
+		}
+		context->last_audio_ts = expected_ts;
+	}
+	out.timestamp = context->last_audio_ts;
 
 	// --- Passive Audio Monitor Algorithm ---
 	if (context->ts_window_start == 0 || now - context->ts_window_start >= 2000000000ULL) {
@@ -112,7 +154,7 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	}
 	context->frames_in_window += out.frames;
 
-	// Keep the diagnostic logging so we can verify the monotonic timeline and jitter
+	// Diagnostic logging to verify monotonic timeline and jitter
 	static uint64_t last_log_time = 0;
 	static uint64_t last_ts = 0;
 	static int call_count = 0;
@@ -132,7 +174,7 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 
 	if (now - last_log_time > 1000000000ULL) {
 		double computed_hz = (last_log_time > 0) ? ((double)total_frames / (double)(now - last_log_time) * 1000000000.0) : 0;
-		obs_log(LOG_INFO, "[SRTLA Audio Diagnostc] 1s Stats | calls: %d | total_frames: %d | min_gap: %.2f ms | max_gap: %.2f ms | stream_hz: %.1f | obs_hz: %lu | current_ts: %llu",
+		obs_log(LOG_INFO, "[SRTLA Audio Diagnostic] 1s Stats | calls: %d | total_frames: %d | min_gap: %.2f ms | max_gap: %.2f ms | stream_hz: %.1f | obs_hz: %lu | current_ts: %llu",
 			call_count, total_frames, 
 			(min_gap == (uint64_t)-1) ? 0 : (double)min_gap / 1000000.0, 
 			(double)max_gap / 1000000.0,
@@ -178,13 +220,17 @@ static void srtla_destroy_media_source(struct srtla_source *context)
 {
 	if (context->media_source) {
 		obs_source_remove_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
-		if (obs_source_active(context->source)) obs_source_dec_active(context->media_source);
-		if (obs_source_showing(context->source)) obs_source_dec_showing(context->media_source);
+		obs_source_dec_active(context->media_source);
 		obs_source_release(context->media_source);
 		context->media_source = NULL;
 	}
 	context->last_audio_ts = 0;
 	context->last_original_ts = 0;
+	context->last_audio_time = 0;
+	context->current_stream_hz = 0;
+	context->starved_since = 0;
+	context->ts_window_start = 0;
+	context->frames_in_window = 0;
 }
 
 static void srtla_create_media_source(struct srtla_source *context)
@@ -238,7 +284,8 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_set_bool(media_settings, "is_local_file", false);
 		obs_data_set_bool(media_settings, "hw_decode", true);
 		obs_data_set_bool(media_settings, "clear_on_media_end", false);
-		obs_data_set_bool(media_settings, "restart_on_activate", true);
+		obs_data_set_bool(media_settings, "restart_on_activate", false);
+		obs_data_set_bool(media_settings, "close_when_inactive", false);
 		obs_data_set_int(media_settings, "reconnect_delay_sec", 1);
 		obs_data_set_int(media_settings, "buffering_mb", 0);
 		obs_data_set_string(media_settings, "ffmpeg_options",
@@ -248,7 +295,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_release(media_settings);
 
 		if (context->media_source) {
-			obs_log(LOG_INFO, "[SRTLA] Created internal ffmpeg_source successfully (live low-latency options applied)");
+			obs_log(LOG_INFO, "[SRTLA] Created internal ffmpeg_source successfully (live continuous playback)");
 		} else {
 			obs_log(LOG_ERROR, "[SRTLA] Failed to create internal ffmpeg_source");
 		}
@@ -261,10 +308,11 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_source_set_async_decoupled(context->source, true);
 		obs_source_add_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
 
-		if (obs_source_active(context->source)) obs_source_inc_active(context->media_source);
-		if (obs_source_showing(context->source)) obs_source_inc_showing(context->media_source);
+		// Keep media source permanently active in background so stream continues receiving across scenes
+		obs_source_inc_active(context->media_source);
 	}
 	context->starved_since = 0;
+	context->last_recovery_time = os_gettime_ns();
 }
 
 void srtla_reload_media_source(void *data)
@@ -274,7 +322,8 @@ void srtla_reload_media_source(void *data)
 #endif
 		struct srtla_source *context = data;
 		if (!context) return;
-		obs_log(LOG_INFO, "[SRTLA] Reloading internal media player for port %d to resync stream...", context->listen_port);
+		obs_log(LOG_INFO, "[SRTLA] Reloading internal media player for port %d and resetting SRTLA group to trigger sender auto-reconnect...", context->listen_port);
+		srtla_reset_group_by_port(context->listen_port);
 		srtla_create_media_source(context);
 #ifdef _WIN32
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -463,14 +512,12 @@ static uint32_t srtla_source_get_height(void *data)
 
 static void srtla_source_activate(void *data)
 {
-	struct srtla_source *context = data;
-	if (context->media_source) obs_source_inc_active(context->media_source);
+	UNUSED_PARAMETER(data);
 }
 
 static void srtla_source_deactivate(void *data)
 {
-	struct srtla_source *context = data;
-	if (context->media_source) obs_source_dec_active(context->media_source);
+	UNUSED_PARAMETER(data);
 }
 
 static void srtla_source_show(void *data)
@@ -536,9 +583,18 @@ void srtla_force_stop(void *data)
 	__try {
 #endif
 		struct srtla_source *context = data;
-		srtla_stop_thread(context);
-		srtla_destroy_media_source(context);
-		context->was_connected = false;
+		if (context) {
+			srtla_reset_group_by_port(context->listen_port);
+			srtla_stop_thread(context);
+			srtla_destroy_media_source(context);
+			context->was_connected = false;
+			context->connected_since = 0;
+			context->last_audio_time = 0;
+			context->starved_since = 0;
+			context->last_recovery_time = 0;
+			context->recovery_attempts = 0;
+			context->pending_recovery = RECOVERY_NONE;
+		}
 #ifdef _WIN32
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
 		obs_log(LOG_ERROR, "[SRTLA] SEH Exception caught in srtla_force_stop! OBS crash prevented.");
@@ -637,30 +693,74 @@ void srtla_auto_recover_hung_sources()
 		
 		int groups = srtla_get_group_count_by_port(s->listen_port);
 		if (groups > 0) {
-			// 1. Audio completely dead for > 10s -> Full restart
-			if (s->last_audio_time > 0 && (now - s->last_audio_time > 10000000000ULL)) {
-				obs_log(LOG_WARNING, "[SRTLA] Port %d has active UDP connections but no audio for 10s! Full restarting source.", s->listen_port);
-				s->needs_restart = true;
-				restart_count++;
+			if (s->connected_since == 0) {
+				s->connected_since = now;
+				s->last_recovery_time = now;
+				s->recovery_attempts = 0;
 			}
-			// 2. Audio starved (< 40kHz) for > 2.5s -> Rapid reload of media player without dropping UDP tunnels
-			else if (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) && s->current_stream_hz > 0 && s->current_stream_hz < 40000.0) {
+
+			// Check if we are in cooldown from a recent recovery action (3.5s cooldown)
+			bool in_cooldown = (s->last_recovery_time > 0 && (now - s->last_recovery_time < 3500000000ULL));
+
+			// Condition A: No audio received on initial connection (>3.5s since connection with 0 audio)
+			bool missing_on_connect = (s->last_audio_time == 0 && (now - s->connected_since >= 3500000000ULL));
+
+			// Condition B: Audio completely dropped mid-stream (>3.5s since last audio frame)
+			bool audio_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time >= 3500000000ULL));
+
+			// Condition C: Audio starved / desynced (< 40kHz for > 2.5s)
+			bool audio_starved = false;
+			if (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) &&
+			    s->current_stream_hz > 0 && s->current_stream_hz < 40000.0) {
 				if (s->starved_since == 0) {
 					s->starved_since = now;
 				} else if (now - s->starved_since >= 2500000000ULL) {
-					obs_log(LOG_WARNING, "[SRTLA] Port %d audio starved (%.1f Hz < 40kHz) for >2.5s! Auto-reloading media player.",
-						s->listen_port, s->current_stream_hz);
-					s->needs_restart = true;
-					s->starved_since = 0; // Reset
-					reload_count++;
+					audio_starved = true;
 				}
 			} else {
 				s->starved_since = 0;
 			}
+
+			if (!in_cooldown && (missing_on_connect || audio_dropped || audio_starved)) {
+				s->recovery_attempts++;
+				s->last_recovery_time = now;
+				s->starved_since = 0;
+
+				// If 3 or more reload attempts failed to bring audio back (~12s without audio), escalate to full restart
+				if (s->recovery_attempts >= 3) {
+					obs_log(LOG_WARNING,
+						"[SRTLA] Port %d audio missing/starved after %d reload attempts! Escalating to full source restart.",
+						s->listen_port, s->recovery_attempts);
+					s->pending_recovery = RECOVERY_RESTART;
+					s->recovery_attempts = 0;
+					restart_count++;
+				} else {
+					if (missing_on_connect) {
+						obs_log(LOG_WARNING,
+							"[SRTLA] Port %d connected for >3.5s but no audio received! Auto-reloading media player (attempt %d).",
+							s->listen_port, s->recovery_attempts);
+					} else if (audio_dropped) {
+						obs_log(LOG_WARNING,
+							"[SRTLA] Port %d active connection but audio stopped for >3.5s! Auto-reloading media player (attempt %d).",
+							s->listen_port, s->recovery_attempts);
+					} else {
+						obs_log(LOG_WARNING,
+							"[SRTLA] Port %d audio starved (%.1f Hz < 40kHz) for >2.5s! Auto-reloading media player (attempt %d).",
+							s->listen_port, s->current_stream_hz, s->recovery_attempts);
+					}
+					s->pending_recovery = RECOVERY_RELOAD;
+					reload_count++;
+				}
+			}
 		} else {
-			// If no groups, reset timers
+			// No active connections / groups: reset all connection & audio timers
+			s->connected_since = 0;
 			s->last_audio_time = 0;
 			s->starved_since = 0;
+			s->current_stream_hz = 0;
+			s->last_recovery_time = 0;
+			s->recovery_attempts = 0;
+			s->pending_recovery = RECOVERY_NONE;
 		}
 	}
 	
@@ -668,9 +768,9 @@ void srtla_auto_recover_hung_sources()
 		restart_targets = calloc(restart_count, sizeof(struct srtla_source *));
 		int i = 0;
 		for (struct srtla_source *s = sources_head; s; s = s->next) {
-			if (s->needs_restart && s->starved_since == 0 && (s->last_audio_time > 0 && (now - s->last_audio_time > 10000000000ULL))) {
+			if (s->pending_recovery == RECOVERY_RESTART) {
 				restart_targets[i++] = s;
-				s->needs_restart = false;
+				s->pending_recovery = RECOVERY_NONE;
 			}
 		}
 	}
@@ -679,9 +779,9 @@ void srtla_auto_recover_hung_sources()
 		reload_targets = calloc(reload_count, sizeof(struct srtla_source *));
 		int i = 0;
 		for (struct srtla_source *s = sources_head; s; s = s->next) {
-			if (s->needs_restart) {
+			if (s->pending_recovery == RECOVERY_RELOAD) {
 				reload_targets[i++] = s;
-				s->needs_restart = false;
+				s->pending_recovery = RECOVERY_NONE;
 			}
 		}
 	}
