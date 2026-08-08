@@ -296,26 +296,6 @@
             </div>
         </div>
 
-        <div class="panel">
-            <h2>OBS Backend Connection Settings</h2>
-            <div style="margin-bottom:15px; font-size:0.9rem; color:var(--text-muted);">
-                Configure the local connection between the PHP backend relay and OBS WebSocket.
-            </div>
-            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:10px; border-bottom:none;">
-                <label style="margin-bottom:5px;">OBS WebSocket Host & Port</label>
-                <div style="display:flex; gap:10px; width:100%;">
-                    <input type="text" id="backend-obs-host" value="127.0.0.1" style="flex-grow:2;">
-                    <input type="number" id="backend-obs-port" value="4455" style="flex-grow:1;">
-                </div>
-            </div>
-            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:10px; border-bottom:none;">
-                <label style="margin-bottom:5px;">OBS WebSocket Password</label>
-                <input type="password" id="backend-obs-pwd" placeholder="Enter OBS WebSocket Password if set" style="width:100%; box-sizing:border-box;">
-            </div>
-            <div style="margin-top:10px; text-align:right;">
-                <button onclick="saveBackendConfig()">Save Backend Config</button>
-            </div>
-        </div>
 
         <div class="panel">
             <h2>Auto-Switcher Rules <button style="float:right; padding:5px 10px;" onclick="addAutoSwitchRule()">+ Add</button></h2>
@@ -580,14 +560,6 @@
                 }
             } catch(e) {}
 
-            // Load Backend Relay config
-            try {
-                const cfgRes = await apiCall('obs_relay.php?action=get_config');
-                if (cfgRes && cfgRes.config) {
-                    document.getElementById('backend-obs-host').value = cfgRes.config.obs_host || '127.0.0.1';
-                    document.getElementById('backend-obs-port').value = cfgRes.config.obs_port || 4455;
-                }
-            } catch(e) {}
 
             // Load Stream Key
             try {
@@ -688,9 +660,59 @@
             }
         }
 
+        let obsWs = null;
+        let obsWsReqId = 1;
+        let obsWsCallbacks = {};
+
+        function getOBSWebSocket() {
+            return new Promise((resolve, reject) => {
+                if (obsWs && obsWs.readyState === WebSocket.OPEN) {
+                    resolve(obsWs);
+                    return;
+                }
+                if (obsWs && obsWs.readyState === WebSocket.CONNECTING) {
+                    setTimeout(() => getOBSWebSocket().then(resolve).catch(reject), 100);
+                    return;
+                }
+                obsWs = new WebSocket(`ws://${window.location.hostname}:4455`);
+                obsWs.onopen = () => { };
+                obsWs.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.op === 0) {
+                        obsWs.send(JSON.stringify({ op: 1, d: { rpcVersion: 1 } }));
+                    } else if (data.op === 2) {
+                        resolve(obsWs);
+                    } else if (data.op === 7) {
+                        const cb = obsWsCallbacks[data.d.requestId];
+                        if (cb) {
+                            cb(data.d.responseData);
+                            delete obsWsCallbacks[data.d.requestId];
+                        }
+                    }
+                };
+                obsWs.onerror = (e) => reject(e);
+            });
+        }
+
+        function obsWsRequest(requestType, requestData = {}) {
+            return getOBSWebSocket().then(ws => {
+                return new Promise((resolve, reject) => {
+                    const reqId = "req_" + (obsWsReqId++);
+                    obsWsCallbacks[reqId] = resolve;
+                    ws.send(JSON.stringify({ op: 6, d: { requestType, requestId: reqId, requestData } }));
+                    setTimeout(() => {
+                        if (obsWsCallbacks[reqId]) {
+                            delete obsWsCallbacks[reqId];
+                            reject("Timeout");
+                        }
+                    }, 3000);
+                });
+            }).catch(e => { return null; });
+        }
+
         async function pollPreview() {
             if (!isConnected || !currentScene) return;
-            const res = await relayRequest('get_screenshot', { sourceName: currentScene, width: 640, height: 360, quality: 45 }, 'POST');
+            const res = await obsWsRequest('GetSourceScreenshot', { sourceName: currentScene, imageFormat: 'jpeg', imageWidth: 640, imageHeight: 360, imageCompressionQuality: 45 });
             if (res && res.imageData) {
                 const img = document.getElementById('preview-image');
                 img.src = res.imageData;
@@ -909,18 +931,6 @@
             alert("Settings saved!");
         }
 
-        async function saveBackendConfig() {
-            const host = document.getElementById('backend-obs-host').value;
-            const port = document.getElementById('backend-obs-port').value;
-            const pwd = document.getElementById('backend-obs-pwd').value;
-            await apiCall('obs_relay.php?action=set_config', 'POST', {
-                obs_host: host,
-                obs_port: port,
-                obs_password: pwd
-            });
-            alert("Backend OBS configuration saved!");
-            pollOverview();
-        }
 
         function renderNoFailoverScenes() {
             const container = document.getElementById('no-failover-scenes-list');

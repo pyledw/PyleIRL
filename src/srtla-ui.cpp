@@ -1929,18 +1929,9 @@ SrtlaWebInterfaceDialog::SrtlaWebInterfaceDialog(QWidget *parent) : QDialog(pare
 	accessPassword->setPlaceholderText("Leave blank to disable");
 	accessPassword->setEchoMode(QLineEdit::Password);
 
-	wsPassword = new QLineEdit();
-	wsPassword->setPlaceholderText("OBS WebSocket Password");
-	wsPassword->setEchoMode(QLineEdit::Password);
-
-	wsUrlOverride = new QLineEdit();
-	wsUrlOverride->setPlaceholderText("wss://your-domain.com:4455");
-
 	formLayout->addRow("Enable Web Interface:", enableWeb);
 	formLayout->addRow("Web Server Port:", webPort);
 	formLayout->addRow("Web Access Password:", accessPassword);
-	formLayout->addRow("OBS WebSocket Password:", wsPassword);
-	formLayout->addRow("OBS WS URL Override:", wsUrlOverride);
 
 	mainLayout->addLayout(formLayout);
 
@@ -1962,13 +1953,7 @@ SrtlaWebInterfaceDialog::SrtlaWebInterfaceDialog(QWidget *parent) : QDialog(pare
 		if (wpwd)
 			accessPassword->setText(QString(wpwd));
 
-		const char *wspwd = config_get_string(global_config, "SRTLA", "WSPassword");
-		if (wspwd)
-			wsPassword->setText(QString(wspwd));
 
-		const char *wsurl = config_get_string(global_config, "SRTLA", "WSUrl");
-		if (wsurl)
-			wsUrlOverride->setText(QString(wsurl));
 	}
 }
 
@@ -1982,14 +1967,9 @@ void SrtlaWebInterfaceDialog::saveSettings()
 		bool currentlyEnabled = (enableWeb->currentIndex() == 1);
 		int currentPort = webPort->value();
 		QString currentPwd = accessPassword->text();
-		QString currentWsPwd = wsPassword->text();
-		QString currentWsUrl = wsUrlOverride->text();
-
 		config_set_bool(global_config, "SRTLA_WebInterface", "Enabled", currentlyEnabled);
 		config_set_int(global_config, "SRTLA_WebInterface", "Port", currentPort);
 		config_set_string(global_config, "SRTLA", "WebAccessPassword", currentPwd.toUtf8().constData());
-		config_set_string(global_config, "SRTLA", "WSPassword", currentWsPwd.toUtf8().constData());
-		config_set_string(global_config, "SRTLA", "WSUrl", currentWsUrl.toUtf8().constData());
 
 		config_save_safe(global_config, "tmp", nullptr);
 

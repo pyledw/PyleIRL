@@ -189,8 +189,6 @@ private:
 	QComboBox *enableWeb;
 	QSpinBox *webPort;
 	class QLineEdit *accessPassword;
-	class QLineEdit *wsPassword;
-	class QLineEdit *wsUrlOverride;
 };
 
 class SrtlaAboutDialog : public QDialog {
