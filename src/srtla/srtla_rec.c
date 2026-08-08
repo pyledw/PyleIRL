@@ -352,18 +352,6 @@ conn_group_t *group_create_full(char *id, time_t ts) {
 int group_destroy(conn_group_t *g, conn_group_t **prev_link) {
   if (g == NULL) return -1;
 
-  // Actively signal all connected senders that the session is terminating so their SRT client triggers immediate auto-reconnect
-  for (conn_t *c = g->conns; c != NULL; c = c->next) {
-    if (srtla_sock > 0) {
-      srt_header_t shutdown_hdr = {0};
-      shutdown_hdr.type = htobe16(SRT_TYPE_SHUTDOWN);
-      SENDTO(srtla_sock, &shutdown_hdr, sizeof(shutdown_hdr), 0, (struct sockaddr*)&c->addr, sizeof(struct sockaddr_storage));
-
-      uint16_t reg_err = htobe16(SRTLA_TYPE_REG_ERR);
-      SENDTO(srtla_sock, &reg_err, sizeof(reg_err), 0, (struct sockaddr*)&c->addr, sizeof(struct sockaddr_storage));
-    }
-  }
-
   for (conn_t *c = g->conns; c != NULL;) {
     conn_t *next = c->next;
 #ifdef _WIN32
@@ -483,18 +471,12 @@ int conn_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
   char *id = in_buf + 2;
   g = group_find_by_id(id);
   if (g == NULL) {
-    // Actively signal client with SRT SHUTDOWN and REG_ERR / REG_NGP so client SRT layer restarts immediately with REG1
-    srt_header_t shutdown_hdr = {0};
-    shutdown_hdr.type = htobe16(SRT_TYPE_SHUTDOWN);
-    SENDTO(srtla_sock, &shutdown_hdr, sizeof(shutdown_hdr), 0, addr, sizeof(struct sockaddr_storage));
-
-    uint16_t header = htobe16(SRTLA_TYPE_REG_ERR);
-    SENDTO(srtla_sock, &header, sizeof(header), 0, addr, sizeof(struct sockaddr_storage));
-
-    uint16_t ngp_header = htobe16(SRTLA_TYPE_REG_NGP);
-    SENDTO(srtla_sock, &ngp_header, sizeof(ngp_header), 0, addr, sizeof(struct sockaddr_storage));
-
-    info("%s:%d: Rejected REG2 for unknown group (sent SRT SHUTDOWN & REG_ERR to trigger client instant reconnect)\n", print_addr(addr), port_no(addr));
+    uint16_t header = htobe16(SRTLA_TYPE_REG_NGP);
+    int sent = SENDTO(srtla_sock, &header, sizeof(header), 0, addr, sizeof(struct sockaddr_storage));
+    if (sent != sizeof(header)) {
+      err("Failed to send REG_NGP to %s:%d (err=%s)\n", print_addr(addr), port_no(addr), sock_err_str());
+    }
+    info("%s:%d: Rejected REG2 for unknown group (forcing client reconnect)\n", print_addr(addr), port_no(addr));
     goto err_early;
   }
 
@@ -718,17 +700,10 @@ void handle_srtla_data(time_t ts) {
   ret = group_find_by_addr((struct sockaddr*)&srtla_addr, &g, &c);
   if (ret != 1) {
     static time_t last_log = 0;
-    if (ts > last_log + 2) {
-      info("Received packet from unmapped peer %s:%d (size %d bytes) - sending SRT SHUTDOWN & REG_ERR to force client auto-reconnect\n", print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), n);
+    if (ts > last_log + 5) {
+      info("Discarding non-SRTLA packet from %s:%d (size %d bytes)\n", print_addr((struct sockaddr*)&srtla_addr), port_no((struct sockaddr*)&srtla_addr), n);
       last_log = ts;
     }
-    // Actively notify the sender to reset its SRT connection and re-register
-    srt_header_t shutdown_hdr = {0};
-    shutdown_hdr.type = htobe16(SRT_TYPE_SHUTDOWN);
-    SENDTO(srtla_sock, &shutdown_hdr, sizeof(shutdown_hdr), 0, (struct sockaddr*)&srtla_addr, sizeof(struct sockaddr_storage));
-
-    uint16_t reg_err = htobe16(SRTLA_TYPE_REG_ERR);
-    SENDTO(srtla_sock, &reg_err, sizeof(reg_err), 0, (struct sockaddr*)&srtla_addr, sizeof(struct sockaddr_storage));
     continue;
   }
 
@@ -1460,17 +1435,6 @@ void srtla_reset_group_by_port(int listen_port) {
                 conn_group_t *g = ctx->_groups;
                 while (g) {
                     conn_group_t *next = g->next;
-                    // Actively send SRT SHUTDOWN and SRTLA REG_ERR to all connected senders
-                    for (conn_t *c = g->conns; c != NULL; c = c->next) {
-                        if (ctx->_srtla_sock > 0) {
-                            srt_header_t shutdown_hdr = {0};
-                            shutdown_hdr.type = htobe16(SRT_TYPE_SHUTDOWN);
-                            SENDTO(ctx->_srtla_sock, &shutdown_hdr, sizeof(shutdown_hdr), 0, (struct sockaddr*)&c->addr, sizeof(struct sockaddr_storage));
-
-                            uint16_t reg_err = htobe16(SRTLA_TYPE_REG_ERR);
-                            SENDTO(ctx->_srtla_sock, &reg_err, sizeof(reg_err), 0, (struct sockaddr*)&c->addr, sizeof(struct sockaddr_storage));
-                        }
-                    }
                     if (g->srt_sock > 0) {
                         close_socket(g->srt_sock);
                         g->srt_sock = -1;

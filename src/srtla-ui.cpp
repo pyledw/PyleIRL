@@ -43,77 +43,86 @@ void srtla_auto_recover_hung_sources();
 
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("SRTLA Status", parent)
 {
+	setObjectName("srtla_status_dock");
+
 	QWidget *centralWidget = new QWidget(this);
 	QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+	mainLayout->setContentsMargins(6, 6, 6, 6);
+	mainLayout->setSpacing(6);
 
-	QFont boldFont;
-	boldFont.setBold(true);
+	// Compact summary bar
+	metricsLabel = new QLabel(this);
+	metricsLabel->setStyleSheet(
+		"QLabel { background-color: #1e1e1e; border: 1px solid #333333; border-radius: 4px; padding: 5px 8px; font-size: 11px; color: #d4d4d4; }");
+	metricsLabel->setTextFormat(Qt::RichText);
+	metricsLabel->setText("<span style='color:#4CAF50; font-weight:bold;'>● Listening</span>  |  <b>Devices:</b> 0  |  <b>Connections:</b> 0  |  <b>Total:</b> 0 Kbps");
+	mainLayout->addWidget(metricsLabel);
 
-	auto addRow = [&](const QString &titleText, QLabel *&labelOut, QVBoxLayout *layout) {
-		QHBoxLayout *rowLayout = new QHBoxLayout();
-		QLabel *title = new QLabel(titleText, this);
-		title->setFont(boldFont);
-		labelOut = new QLabel("-", this);
-		rowLayout->addWidget(title);
-		rowLayout->addWidget(labelOut);
-		rowLayout->addStretch();
-		layout->addLayout(rowLayout);
-	};
+	// Resizable vertical splitter between Receiver Controls and Connections
+	splitter = new QSplitter(Qt::Vertical, centralWidget);
+	splitter->setChildrenCollapsible(true);
+	splitter->setStyleSheet(
+		"QSplitter::handle:vertical { background-color: #333333; height: 5px; margin: 2px 0px; border-radius: 2px; } "
+		"QSplitter::handle:vertical:hover { background-color: #4CAF50; }");
 
-	addRow("Receiver Status:", statusLabel, mainLayout);
-	addRow("Listening UDP Port:", portLabel, mainLayout);
-
-	QFrame *line1 = new QFrame();
-	line1->setFrameShape(QFrame::HLine);
-	line1->setFrameShadow(QFrame::Sunken);
-	mainLayout->addWidget(line1);
-
-	addRow("Active Devices (Groups):", encodersLabel, mainLayout);
-	addRow("Active Bonded Connections:", connectionsLabel, mainLayout);
-	addRow("Failed/Dropped Connections:", failedConnectionsLabel, mainLayout);
-
-	QFrame *line2 = new QFrame();
-	line2->setFrameShape(QFrame::HLine);
-	line2->setFrameShadow(QFrame::Sunken);
-	mainLayout->addWidget(line2);
-
-	QLabel *receiversTitle = new QLabel("Configured Receivers:", this);
-	receiversTitle->setFont(boldFont);
-	mainLayout->addWidget(receiversTitle);
-
-	receiversTable = new QTableWidget(this);
-	receiversTable->setColumnCount(4);
-	receiversTable->setHorizontalHeaderLabels(QStringList() << "Name" << "Port" << "Status" << "Actions");
-	receiversTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-	receiversTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-	receiversTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-	receiversTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+	// Compact Receivers & Controls Table (primary section with priority)
+	receiversTable = new QTableWidget(splitter);
+	receiversTable->setColumnCount(3);
+	receiversTable->setHorizontalHeaderLabels(QStringList() << "Receiver" << "Status" << "Controls");
+	receiversTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+	receiversTable->horizontalHeader()->setStretchLastSection(true);
+	receiversTable->setColumnWidth(0, 140);
+	receiversTable->setColumnWidth(1, 75);
+	receiversTable->setColumnWidth(2, 235);
 	receiversTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	receiversTable->setSelectionMode(QAbstractItemView::NoSelection);
 	receiversTable->setAlternatingRowColors(true);
 	receiversTable->setStyleSheet(
-		"QTableWidget { background-color: #1e1e1e; color: #d4d4d4; } QHeaderView::section { background-color: #2d2d2d; color: white; padding: 4px; }");
+		"QTableWidget { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 3px; font-size: 12px; } "
+		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 4px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
 	receiversTable->verticalHeader()->setVisible(false);
-	mainLayout->addWidget(receiversTable, 1);
+	receiversTable->verticalHeader()->setDefaultSectionSize(38);
+	receiversTable->setMinimumHeight(45);
+	receiversTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-	QLabel *detailsTitle = new QLabel("Connected Devices (IP:Port):", this);
-	detailsTitle->setFont(boldFont);
-	mainLayout->addWidget(detailsTitle);
-
-	treeWidget = new QTreeWidget(this);
-	treeWidget->setHeaderLabels(QStringList() << "Name / IP" << "Port" << "Bandwidth");
-	treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-	treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-	treeWidget->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+	// Condensed Active Connections & KBPS Tree (minimized by default)
+	treeWidget = new QTreeWidget(splitter);
+	treeWidget->setHeaderLabels(QStringList() << "Active Connection / Link" << "Bitrate");
+	treeWidget->header()->setSectionResizeMode(QHeaderView::Interactive);
+	treeWidget->header()->setStretchLastSection(true);
+	treeWidget->setColumnWidth(0, 220);
+	treeWidget->setColumnWidth(1, 120);
 	treeWidget->setAlternatingRowColors(true);
 	treeWidget->setStyleSheet(
-		"QTreeWidget { background-color: #1e1e1e; color: #d4d4d4; } QHeaderView::section { background-color: #2d2d2d; color: white; padding: 4px; }");
+		"QTreeWidget { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 3px; font-size: 11px; } "
+		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 4px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
 
-	mainLayout->addWidget(treeWidget, 1); // Expand to fill available space
+	splitter->addWidget(receiversTable);
+	splitter->addWidget(treeWidget);
+	splitter->setStretchFactor(0, 1); // Receivers table gets priority
+	splitter->setStretchFactor(1, 0); // Connections tree minimized by default
 
-	QPushButton *logButton = new QPushButton("View Detailed Plugin Logs", this);
-	connect(logButton, &QPushButton::clicked, this, &SrtlaStatusWidget::openLogFolder);
-	mainLayout->addWidget(logButton);
+	QSettings settings("obs-studio", "PyleIRL");
+	QByteArray splitterState = settings.value("status_splitter_state").toByteArray();
+	if (!splitterState.isEmpty()) {
+		splitter->restoreState(splitterState);
+	} else {
+		// By default, receiver controls take full size and connections tree is minimized
+		splitter->setSizes(QList<int>() << 500 << 0);
+	}
+
+	QByteArray tableHeaderState = settings.value("status_table_header").toByteArray();
+	if (!tableHeaderState.isEmpty()) {
+		receiversTable->horizontalHeader()->restoreState(tableHeaderState);
+	}
+	QByteArray treeHeaderState = settings.value("status_tree_header").toByteArray();
+	if (!treeHeaderState.isEmpty()) {
+		treeWidget->header()->restoreState(treeHeaderState);
+	}
+
+	connect(splitter, &QSplitter::splitterMoved, this, &SrtlaStatusWidget::onSplitterMoved);
+
+	mainLayout->addWidget(splitter, 1);
 
 	setWidget(centralWidget);
 	setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
@@ -127,7 +136,29 @@ SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("SRTLA Statu
 	updateStatus(); // initial update
 }
 
-SrtlaStatusWidget::~SrtlaStatusWidget() {}
+SrtlaStatusWidget::~SrtlaStatusWidget()
+{
+	QSettings settings("obs-studio", "PyleIRL");
+	if (splitter) {
+		settings.setValue("status_splitter_state", splitter->saveState());
+	}
+	if (receiversTable && receiversTable->horizontalHeader()) {
+		settings.setValue("status_table_header", receiversTable->horizontalHeader()->saveState());
+	}
+	if (treeWidget && treeWidget->header()) {
+		settings.setValue("status_tree_header", treeWidget->header()->saveState());
+	}
+}
+
+void SrtlaStatusWidget::onSplitterMoved(int pos, int index)
+{
+	Q_UNUSED(pos);
+	Q_UNUSED(index);
+	QSettings settings("obs-studio", "PyleIRL");
+	if (splitter) {
+		settings.setValue("status_splitter_state", splitter->saveState());
+	}
+}
 
 void SrtlaStatusWidget::openLogFolder()
 {
@@ -152,17 +183,7 @@ void SrtlaStatusWidget::updateStatus()
 		srtla_get_connection_details(&listen_port, &failed_conns, details_buffer, sizeof(details_buffer));
 		srtla_get_all_receivers_json(receivers_buffer, sizeof(receivers_buffer));
 
-		if (is_listening) {
-			statusLabel->setText("Listening");
-			statusLabel->setStyleSheet("color: #4CAF50; font-weight: bold;"); // Green
-		} else {
-			statusLabel->setText("Not Listening");
-			statusLabel->setStyleSheet("color: gray;");
-		}
-
-		encodersLabel->setText(QString::number(groups));
-		connectionsLabel->setText(QString::number(connections));
-		failedConnectionsLabel->setText(QString::number(failed_conns));
+		double totalBitrateKbps = 0.0;
 
 		QJsonDocument rDoc = QJsonDocument::fromJson(QByteArray(receivers_buffer));
 		if (rDoc.isArray()) {
@@ -179,7 +200,7 @@ void SrtlaStatusWidget::updateStatus()
 				int foundRow = -1;
 				for (int r = 0; r < receiversTable->rowCount(); ++r) {
 					QTableWidgetItem *item = receiversTable->item(r, 0);
-					if (item && item->text() == name) {
+					if (item && item->data(Qt::UserRole).toString() == name) {
 						foundRow = r;
 						break;
 					}
@@ -188,18 +209,22 @@ void SrtlaStatusWidget::updateStatus()
 				if (foundRow == -1) {
 					foundRow = receiversTable->rowCount();
 					receiversTable->insertRow(foundRow);
+					receiversTable->setRowHeight(foundRow, 40);
 
-					QTableWidgetItem *nameItem = new QTableWidgetItem(name);
-					QTableWidgetItem *portItem = new QTableWidgetItem(port);
+					QTableWidgetItem *nameItem = new QTableWidgetItem(name + " (" + port + ")");
+					nameItem->setData(Qt::UserRole, name);
+					nameItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+
 					QTableWidgetItem *statusItem = new QTableWidgetItem();
+					statusItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignCenter);
 					
 					receiversTable->setItem(foundRow, 0, nameItem);
-					receiversTable->setItem(foundRow, 1, portItem);
-					receiversTable->setItem(foundRow, 2, statusItem);
+					receiversTable->setItem(foundRow, 1, statusItem);
 
 					QWidget *actionWidget = new QWidget();
 					QHBoxLayout *actionLayout = new QHBoxLayout(actionWidget);
 					actionLayout->setContentsMargins(2, 2, 2, 2);
+					actionLayout->setSpacing(4);
 
 					QPushButton *startBtn = new QPushButton("Start");
 					QPushButton *stopBtn = new QPushButton("Stop");
@@ -211,6 +236,11 @@ void SrtlaStatusWidget::updateStatus()
 					restartBtn->setObjectName("restartBtn");
 					fixBtn->setObjectName("fixBtn");
 					fixBtn->setToolTip("Rapidly reload the internal player to clear audio lag / desync without dropping the SRTLA connection");
+
+					startBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
+					stopBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
+					restartBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
+					fixBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
 
 					QObject::connect(startBtn, &QPushButton::clicked,
 							 [name]() { srtla_force_start_by_name(name.toUtf8().constData()); });
@@ -225,19 +255,19 @@ void SrtlaStatusWidget::updateStatus()
 					actionLayout->addWidget(stopBtn);
 					actionLayout->addWidget(restartBtn);
 					actionLayout->addWidget(fixBtn);
-					receiversTable->setCellWidget(foundRow, 3, actionWidget);
+					receiversTable->setCellWidget(foundRow, 2, actionWidget);
 				}
 
-				QTableWidgetItem *portItem = receiversTable->item(foundRow, 1);
-				if (portItem) portItem->setText(port);
+				QTableWidgetItem *nameItem = receiversTable->item(foundRow, 0);
+				if (nameItem) nameItem->setText(name + " (" + port + ")");
 
-				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 2);
+				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 1);
 				if (statusItem) {
 					statusItem->setText(running ? "Running" : "Stopped");
 					statusItem->setForeground(running ? QBrush(QColor("#4CAF50")) : QBrush(QColor("gray")));
 				}
 
-				QWidget *actionWidget = receiversTable->cellWidget(foundRow, 3);
+				QWidget *actionWidget = receiversTable->cellWidget(foundRow, 2);
 				if (actionWidget) {
 					QPushButton *startBtn = actionWidget->findChild<QPushButton*>("startBtn");
 					QPushButton *stopBtn = actionWidget->findChild<QPushButton*>("stopBtn");
@@ -255,29 +285,20 @@ void SrtlaStatusWidget::updateStatus()
 			// Remove stale receivers
 			for (int r = receiversTable->rowCount() - 1; r >= 0; r--) {
 				QTableWidgetItem *item = receiversTable->item(r, 0);
-				if (item && !currentReceiverNames.contains(item->text())) {
+				if (item && !currentReceiverNames.contains(item->data(Qt::UserRole).toString())) {
 					receiversTable->removeRow(r);
 				}
 			}
+
+			int totalRows = receiversTable->rowCount();
+			int calculatedMinHeight = qMax(45, totalRows * 38 + 26);
+			receiversTable->setMinimumHeight(calculatedMinHeight);
 		}
 
 		QJsonDocument doc = QJsonDocument::fromJson(QByteArray(details_buffer));
-		QString portsString = "-";
 
 		if (doc.isObject()) {
 			QJsonObject root = doc.object();
-
-			QJsonArray portsArray = root["ports"].toArray();
-			if (!portsArray.isEmpty()) {
-				QStringList portList;
-				for (int i = 0; i < portsArray.size(); i++) {
-					portList << QString::number(portsArray[i].toInt());
-				}
-				portsString = portList.join(", ");
-			}
-
-			portLabel->setText(portsString);
-
 			QJsonArray groupsArray = root["groups"].toArray();
 
 			// Keep track of which items exist to remove stale ones
@@ -289,8 +310,6 @@ void SrtlaStatusWidget::updateStatus()
 				QString listenPortStr = QString::number(gObj["listen_port"].toInt());
 				QString uniqueGroupIdStr = listenPortStr + "_" + groupIdStr;
 				currentGroupIds.insert(uniqueGroupIdStr);
-
-				// gKbps will be calculated by summing the connections
 
 				QString nodeName = "Port " + listenPortStr + " (Device #" + groupIdStr + ")";
 
@@ -316,8 +335,6 @@ void SrtlaStatusWidget::updateStatus()
 					groupItem->setForeground(0, QBrush(QColor("#d4d4d4"))); // Default
 				}
 
-				groupItem->setText(1, "-");
-
 				QJsonArray connsArray = gObj["conns"].toArray();
 				QSet<QString> currentConnIds;
 				double calculatedSumKbps = 0.0;
@@ -339,27 +356,25 @@ void SrtlaStatusWidget::updateStatus()
 
 					QTreeWidgetItem *connItem = nullptr;
 					for (int k = 0; k < groupItem->childCount(); k++) {
-						if (groupItem->child(k)->text(0) == ip &&
-						    groupItem->child(k)->text(1) == port) {
+						if (groupItem->child(k)->text(0) == (ip + ":" + port)) {
 							connItem = groupItem->child(k);
 							break;
 						}
 					}
 					if (!connItem) {
 						connItem = new QTreeWidgetItem(groupItem);
-						connItem->setText(0, ip);
-						connItem->setText(1, port);
+						connItem->setText(0, ip + ":" + port);
 					}
-					connItem->setText(2, QString::number(cKbps, 'f', 1) + " Kbps");
+					connItem->setText(1, QString::number(cKbps, 'f', 1) + " Kbps");
 				}
 
-				groupItem->setText(2, QString::number(calculatedSumKbps, 'f', 1) + " Kbps");
+				totalBitrateKbps += calculatedSumKbps;
+				groupItem->setText(1, QString::number(calculatedSumKbps, 'f', 1) + " Kbps");
 
 				// Remove disconnected children
 				for (int k = groupItem->childCount() - 1; k >= 0; k--) {
-					QString ip = groupItem->child(k)->text(0);
-					QString port = groupItem->child(k)->text(1);
-					QString connIdStr = groupIdStr + "_" + ip + ":" + port;
+					QString linkText = groupItem->child(k)->text(0);
+					QString connIdStr = groupIdStr + "_" + linkText;
 					if (!currentConnIds.contains(connIdStr)) {
 						delete groupItem->takeChild(k);
 					}
@@ -375,9 +390,17 @@ void SrtlaStatusWidget::updateStatus()
 				}
 			}
 		}
+
+		QString summaryText = QString("<span style='color:%1; font-weight:bold;'>● %2</span>  |  <b>Devices:</b> %3  |  <b>Connections:</b> %4  |  <b>Total:</b> %5 Kbps")
+			.arg(is_listening ? "#4CAF50" : "#888888")
+			.arg(is_listening ? "Listening" : "Idle")
+			.arg(groups)
+			.arg(connections)
+			.arg(QString::number(totalBitrateKbps, 'f', 0));
+		metricsLabel->setText(summaryText);
+
 	} catch (...) {
-		statusLabel->setText("Backend Error");
-		statusLabel->setStyleSheet("color: red; font-weight: bold;");
+		metricsLabel->setText("<span style='color:red; font-weight:bold;'>● Backend Error</span>");
 		treeWidget->clear();
 		QTreeWidgetItem *errItem = new QTreeWidgetItem(treeWidget);
 		errItem->setText(0, "A severe exception was caught.");
@@ -688,11 +711,13 @@ extern "C" void srtla_proxy_settings_changed()
 #include <QMap>
 #include <QTabWidget>
 #include <QSet>
+#include <obs-audio-controls.h>
+#include <util/platform.h>
 
 SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 {
-	setWindowTitle("SRTLA Auto-Switch Settings");
-	setMinimumWidth(600);
+	setWindowTitle("PyleIRL Automation Settings");
+	setMinimumWidth(650);
 
 	QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
@@ -741,6 +766,24 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		},
 		&availableSources);
 	availableSources.sort();
+
+	// Populate audio sources
+	obs_enum_sources(
+		[](void *data, obs_source_t *source) {
+			QStringList *list = static_cast<QStringList *>(data);
+			uint32_t flags = obs_source_get_output_flags(source);
+			if (flags & OBS_SOURCE_AUDIO) {
+				const char *name = obs_source_get_name(source);
+				if (name) {
+					QString nameStr = QString::fromUtf8(name);
+					if (!list->contains(nameStr))
+						list->append(nameStr);
+				}
+			}
+			return true;
+		},
+		&availableAudioSources);
+	availableAudioSources.sort();
 
 	sceneLayout->addRow("Enable Range-Based Auto-Switch:", enableAutoSwitch);
 	sceneLayout->addRow("Switch Delay:", switchDelay);
@@ -799,6 +842,36 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 
 	tabs->addTab(visTab, "Source Visibility");
 
+	// Dynamic Volume Sources Tab
+	QWidget *volTab = new QWidget();
+	QFormLayout *volLayout = new QFormLayout(volTab);
+
+	enableVolSwitch = new QComboBox();
+	enableVolSwitch->addItem("Disabled");
+	enableVolSwitch->addItem("Enabled");
+
+	volSwitchDelay = new QSpinBox();
+	volSwitchDelay->setRange(0, 60);
+	volSwitchDelay->setSuffix(" seconds");
+	volSwitchDelay->setValue(2); // Default 2 seconds
+
+	volumeRulesTable = new QTableWidget();
+	volumeRulesTable->setColumnCount(5);
+	volumeRulesTable->setHorizontalHeaderLabels(QStringList() << "Audio Source" << "Min dB" << "Max dB"
+								  << "Target Layer / Source" << "");
+	volumeRulesTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+	volumeRulesTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+
+	QPushButton *addVolRuleBtn = new QPushButton("Add Dynamic Volume Rule");
+	connect(addVolRuleBtn, &QPushButton::clicked, this, &SrtlaAutoSwitchDialog::addNewVolumeRule);
+
+	volLayout->addRow("Enable Dynamic Volume Sources:", enableVolSwitch);
+	volLayout->addRow("Switch Delay:", volSwitchDelay);
+	volLayout->addRow(volumeRulesTable);
+	volLayout->addRow(addVolRuleBtn);
+
+	tabs->addTab(volTab, "Dynamic Volume Sources");
+
 	mainLayout->addWidget(tabs);
 
 	QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -814,6 +887,8 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		enableAutoSwitch->setCurrentIndex(config_get_bool(global_config, "SRTLA_AutoSwitch", "Enabled") ? 1
 														: 0);
 		enableVisSwitch->setCurrentIndex(config_get_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled") ? 1
+														  : 0);
+		enableVolSwitch->setCurrentIndex(config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled") ? 1
 														  : 0);
 
 		int delay = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
@@ -831,6 +906,11 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		int visDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
 		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "VisDelay")) {
 			visSwitchDelay->setValue(visDelay);
+		}
+
+		int volDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay");
+		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "VolDelay")) {
+			volSwitchDelay->setValue(volDelay);
 		}
 
 		const char *rulesJson = config_get_string(global_config, "SRTLA_AutoSwitch", "RulesJSON");
@@ -873,6 +953,19 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 					QJsonObject obj = arr[i].toObject();
 					addVisibilityRuleRow(obj["minKbps"].toInt(), obj["maxKbps"].toInt(),
 							     obj["sourceName"].toString());
+				}
+			}
+		}
+
+		const char *volRulesJson = config_get_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON");
+		if (volRulesJson && *volRulesJson) {
+			QJsonDocument doc = QJsonDocument::fromJson(QByteArray(volRulesJson));
+			if (doc.isArray()) {
+				QJsonArray arr = doc.array();
+				for (int i = 0; i < arr.size(); i++) {
+					QJsonObject obj = arr[i].toObject();
+					addVolumeRuleRow(obj["audioSource"].toString(), obj["minDb"].toInt(),
+							 obj["maxDb"].toInt(), obj["targetSource"].toString());
 				}
 			}
 		}
@@ -960,6 +1053,61 @@ void SrtlaAutoSwitchDialog::addNewVisibilityRule()
 	addVisibilityRuleRow(0, 0, "");
 }
 
+void SrtlaAutoSwitchDialog::addVolumeRuleRow(const QString &audioSource, int minDb, int maxDb,
+					    const QString &targetSource)
+{
+	int row = volumeRulesTable->rowCount();
+	volumeRulesTable->insertRow(row);
+
+	QComboBox *audioCb = new QComboBox();
+	audioCb->setEditable(true);
+	audioCb->addItems(availableAudioSources);
+	int aIdx = audioCb->findText(audioSource);
+	if (aIdx >= 0)
+		audioCb->setCurrentIndex(aIdx);
+	else
+		audioCb->setCurrentText(audioSource);
+	volumeRulesTable->setCellWidget(row, 0, audioCb);
+
+	QSpinBox *minSp = new QSpinBox();
+	minSp->setRange(-100, 0);
+	minSp->setSuffix(" dB");
+	minSp->setValue(minDb);
+	volumeRulesTable->setCellWidget(row, 1, minSp);
+
+	QSpinBox *maxSp = new QSpinBox();
+	maxSp->setRange(-100, 0);
+	maxSp->setSuffix(" dB");
+	maxSp->setValue(maxDb);
+	volumeRulesTable->setCellWidget(row, 2, maxSp);
+
+	QComboBox *targetCb = new QComboBox();
+	targetCb->setEditable(true);
+	targetCb->addItems(availableSources);
+	int tIdx = targetCb->findText(targetSource);
+	if (tIdx >= 0)
+		targetCb->setCurrentIndex(tIdx);
+	else
+		targetCb->setCurrentText(targetSource);
+	volumeRulesTable->setCellWidget(row, 3, targetCb);
+
+	QPushButton *removeBtn = new QPushButton("Remove");
+	connect(removeBtn, &QPushButton::clicked, [this, removeBtn]() {
+		for (int i = 0; i < volumeRulesTable->rowCount(); i++) {
+			if (volumeRulesTable->cellWidget(i, 4) == removeBtn) {
+				volumeRulesTable->removeRow(i);
+				break;
+			}
+		}
+	});
+	volumeRulesTable->setCellWidget(row, 4, removeBtn);
+}
+
+void SrtlaAutoSwitchDialog::addNewVolumeRule()
+{
+	addVolumeRuleRow(availableAudioSources.isEmpty() ? "" : availableAudioSources[0], -100, -50, "");
+}
+
 void SrtlaAutoSwitchDialog::saveSettings()
 {
 	config_t *global_config = obs_frontend_get_profile_config();
@@ -970,6 +1118,9 @@ void SrtlaAutoSwitchDialog::saveSettings()
 
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled", enableVisSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "VisDelay", visSwitchDelay->value());
+
+		config_set_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled", enableVolSwitch->currentIndex() == 1);
+		config_set_int(global_config, "SRTLA_AutoSwitch", "VolDelay", volSwitchDelay->value());
 
 		QJsonArray arr;
 		for (int i = 0; i < rulesTable->rowCount(); i++) {
@@ -1022,6 +1173,28 @@ void SrtlaAutoSwitchDialog::saveSettings()
 		config_set_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON",
 				  visJsonString.toUtf8().constData());
 
+		QJsonArray volArr;
+		for (int i = 0; i < volumeRulesTable->rowCount(); i++) {
+			QComboBox *audioCb = qobject_cast<QComboBox *>(volumeRulesTable->cellWidget(i, 0));
+			QSpinBox *minSp = qobject_cast<QSpinBox *>(volumeRulesTable->cellWidget(i, 1));
+			QSpinBox *maxSp = qobject_cast<QSpinBox *>(volumeRulesTable->cellWidget(i, 2));
+			QComboBox *targetCb = qobject_cast<QComboBox *>(volumeRulesTable->cellWidget(i, 3));
+
+			if (audioCb && minSp && maxSp && targetCb) {
+				QJsonObject obj;
+				obj["audioSource"] = audioCb->currentText();
+				obj["minDb"] = minSp->value();
+				obj["maxDb"] = maxSp->value();
+				obj["targetSource"] = targetCb->currentText();
+				volArr.append(obj);
+			}
+		}
+		QJsonDocument volDoc(volArr);
+		QString volJsonString = volDoc.toJson(QJsonDocument::Compact);
+
+		config_set_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON",
+				  volJsonString.toUtf8().constData());
+
 		config_save_safe(global_config, "tmp", nullptr);
 	}
 
@@ -1036,7 +1209,8 @@ SrtlaAutoSwitcher::SrtlaAutoSwitcher(QObject *parent)
 	  currentMatchedRuleIndex(-1),
 	  currentlyAppliedRuleIndex(-1),
 	  matchDurationCounter(0),
-	  visMatchDurationCounter(0)
+	  visMatchDurationCounter(0),
+	  volMatchDurationCounter(0)
 {
 	connect(timer, &QTimer::timeout, this, &SrtlaAutoSwitcher::checkBitrate);
 	obs_frontend_add_event_callback(handleFrontendEvent, this);
@@ -1045,6 +1219,111 @@ SrtlaAutoSwitcher::SrtlaAutoSwitcher(QObject *parent)
 SrtlaAutoSwitcher::~SrtlaAutoSwitcher()
 {
 	obs_frontend_remove_event_callback(handleFrontendEvent, this);
+	clearMonitoredAudioSources();
+}
+
+void SrtlaAutoSwitcher::volmeterCallback(void *param, const float magnitude[MAX_AUDIO_CHANNELS],
+					const float peak[MAX_AUDIO_CHANNELS],
+					const float input_peak[MAX_AUDIO_CHANNELS])
+{
+	UNUSED_PARAMETER(magnitude);
+	UNUSED_PARAMETER(input_peak);
+	MonitoredAudioSource *mas = static_cast<MonitoredAudioSource *>(param);
+	if (!mas)
+		return;
+
+	if (mas->source && obs_source_muted(mas->source)) {
+		mas->lastDb = -100.0f;
+		mas->lastUpdateTime = os_gettime_ns();
+		return;
+	}
+
+	float max_peak = 0.0f;
+	for (int c = 0; c < MAX_AUDIO_CHANNELS; c++) {
+		if (peak[c] > max_peak) {
+			max_peak = peak[c];
+		}
+	}
+
+	if (max_peak > 0.0000001f) {
+		float db = obs_mul_to_db(max_peak);
+		if (db < -100.0f)
+			db = -100.0f;
+		if (db > 0.0f)
+			db = 0.0f;
+		mas->lastDb = db;
+	} else {
+		mas->lastDb = -100.0f;
+	}
+	mas->lastUpdateTime = os_gettime_ns();
+}
+
+void SrtlaAutoSwitcher::clearMonitoredAudioSources()
+{
+	for (auto mas : monitoredAudioSources) {
+		if (mas) {
+			if (mas->volmeter) {
+				obs_volmeter_remove_callback(mas->volmeter, volmeterCallback, mas);
+				obs_volmeter_detach_source(mas->volmeter);
+				obs_volmeter_destroy(mas->volmeter);
+				mas->volmeter = nullptr;
+			}
+			if (mas->source) {
+				obs_source_release(mas->source);
+				mas->source = nullptr;
+			}
+			delete mas;
+		}
+	}
+	monitoredAudioSources.clear();
+}
+
+void SrtlaAutoSwitcher::updateMonitoredAudioSources()
+{
+	QSet<QString> neededSources;
+	for (const auto &r : volumeRules) {
+		if (!r.audioSource.trimmed().isEmpty()) {
+			neededSources.insert(r.audioSource.trimmed());
+		}
+	}
+
+	// Remove any sources no longer in rules
+	QList<QString> currentKeys = monitoredAudioSources.keys();
+	for (const QString &key : currentKeys) {
+		if (!neededSources.contains(key)) {
+			MonitoredAudioSource *mas = monitoredAudioSources.take(key);
+			if (mas) {
+				if (mas->volmeter) {
+					obs_volmeter_remove_callback(mas->volmeter, volmeterCallback, mas);
+					obs_volmeter_detach_source(mas->volmeter);
+					obs_volmeter_destroy(mas->volmeter);
+				}
+				if (mas->source) {
+					obs_source_release(mas->source);
+				}
+				delete mas;
+			}
+		}
+	}
+
+	// Add any newly needed sources
+	for (const QString &srcName : neededSources) {
+		if (!monitoredAudioSources.contains(srcName)) {
+			obs_source_t *src = obs_get_source_by_name(srcName.toUtf8().constData());
+			if (src) {
+				MonitoredAudioSource *mas = new MonitoredAudioSource();
+				mas->source = src;
+				mas->lastDb = -100.0f;
+				mas->lastUpdateTime = os_gettime_ns();
+				mas->volmeter = obs_volmeter_create(OBS_FADER_LOG);
+				if (mas->volmeter) {
+					obs_volmeter_attach_source(mas->volmeter, src);
+					obs_volmeter_add_callback(mas->volmeter, volmeterCallback, mas);
+				}
+				monitoredAudioSources.insert(srcName, mas);
+			}
+		}
+	}
 }
 
 void SrtlaAutoSwitcher::handleFrontendEvent(enum obs_frontend_event event, void *private_data)
@@ -1076,6 +1355,7 @@ void SrtlaAutoSwitcher::loadRules()
 {
 	rules.clear();
 	visibilityRules.clear();
+	volumeRules.clear();
 	noFailoverScenes.clear();
 
 	config_t *global_config = obs_frontend_get_profile_config();
@@ -1122,7 +1402,26 @@ void SrtlaAutoSwitcher::loadRules()
 				}
 			}
 		}
+
+		const char *volRulesJson = config_get_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON");
+		if (volRulesJson && *volRulesJson) {
+			QJsonDocument doc = QJsonDocument::fromJson(QByteArray(volRulesJson));
+			if (doc.isArray()) {
+				QJsonArray arr = doc.array();
+				for (int i = 0; i < arr.size(); i++) {
+					QJsonObject obj = arr[i].toObject();
+					VolumeVisibilityRule r;
+					r.audioSource = obj["audioSource"].toString();
+					r.minDb = obj["minDb"].toInt();
+					r.maxDb = obj["maxDb"].toInt();
+					r.targetSource = obj["targetSource"].toString();
+					volumeRules.append(r);
+				}
+			}
+		}
 	}
+
+	updateMonitoredAudioSources();
 }
 
 void SrtlaAutoSwitcher::start()
@@ -1135,6 +1434,10 @@ void SrtlaAutoSwitcher::start()
 	currentlyAppliedVisRules.clear();
 	visMatchDurationCounter = 0;
 
+	currentMatchedVolRules.clear();
+	currentlyAppliedVolRules.clear();
+	volMatchDurationCounter = 0;
+
 	if (!timer->isActive()) {
 		timer->start(1000); // Check every second
 	}
@@ -1143,6 +1446,7 @@ void SrtlaAutoSwitcher::start()
 void SrtlaAutoSwitcher::stop()
 {
 	timer->stop();
+	clearMonitoredAudioSources();
 }
 
 void SrtlaAutoSwitcher::checkBitrate()
@@ -1153,7 +1457,108 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 	bool enabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "Enabled");
 	bool visEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled");
+	bool volEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
 
+	if ((!enabled || rules.isEmpty()) && (!visEnabled || visibilityRules.isEmpty()) &&
+	    (!volEnabled || volumeRules.isEmpty())) {
+		currentMatchedRuleIndex = -1;
+		matchDurationCounter = 0;
+		currentMatchedVisRules.clear();
+		visMatchDurationCounter = 0;
+		currentMatchedVolRules.clear();
+		volMatchDurationCounter = 0;
+		return;
+	}
+
+	int delay = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
+	int visDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
+	int volDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay");
+	if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "VolDelay")) {
+		volDelay = 2;
+	}
+
+	// 1. Dynamic Volume Sources Automation (evaluates OBS audio sources)
+	if (volEnabled && !volumeRules.isEmpty()) {
+		// Update monitored sources in case new ones appeared in OBS
+		updateMonitoredAudioSources();
+
+		QSet<int> matchedVolRules;
+		uint64_t now = os_gettime_ns();
+
+		for (int i = 0; i < volumeRules.size(); i++) {
+			const VolumeVisibilityRule &r = volumeRules[i];
+			float currentDb = -100.0f;
+			QString srcKey = r.audioSource.trimmed();
+
+			if (monitoredAudioSources.contains(srcKey)) {
+				MonitoredAudioSource *mas = monitoredAudioSources[srcKey];
+				if (mas) {
+					if (mas->source && obs_source_muted(mas->source)) {
+						currentDb = -100.0f;
+					} else if (now - mas->lastUpdateTime > 1500000000ULL) {
+						currentDb = -100.0f;
+					} else {
+						currentDb = mas->lastDb;
+					}
+				}
+			} else {
+				currentDb = -100.0f;
+			}
+
+			if (currentDb >= r.minDb && currentDb <= r.maxDb) {
+				matchedVolRules.insert(i);
+			}
+		}
+
+		if (matchedVolRules != currentMatchedVolRules) {
+			currentMatchedVolRules = matchedVolRules;
+			volMatchDurationCounter = 0;
+		}
+
+		volMatchDurationCounter++;
+		if (volMatchDurationCounter > volDelay) {
+			volMatchDurationCounter = volDelay;
+		}
+
+		if (volMatchDurationCounter >= volDelay) {
+			QSet<QString> allRuleTargets;
+			for (const auto &r : volumeRules) {
+				if (!r.targetSource.trimmed().isEmpty())
+					allRuleTargets.insert(r.targetSource.trimmed());
+			}
+
+			QSet<QString> targetsToShow;
+			for (int index : currentMatchedVolRules) {
+				if (!volumeRules[index].targetSource.trimmed().isEmpty())
+					targetsToShow.insert(volumeRules[index].targetSource.trimmed());
+			}
+
+			struct obs_frontend_source_list scenes = {};
+			obs_frontend_get_scenes(&scenes);
+			for (size_t i = 0; i < scenes.sources.num; i++) {
+				obs_source_t *scene_source = scenes.sources.array[i];
+				obs_scene_t *scene = obs_scene_from_source(scene_source);
+				if (scene) {
+					for (const auto &targetName : allRuleTargets) {
+						obs_sceneitem_t *item = obs_scene_find_source_recursive(
+							scene, targetName.toUtf8().constData());
+						if (item) {
+							bool shouldShow = targetsToShow.contains(targetName);
+							obs_sceneitem_set_visible(item, shouldShow);
+						}
+					}
+				}
+			}
+			obs_frontend_source_list_free(&scenes);
+
+			currentlyAppliedVolRules = currentMatchedVolRules;
+		}
+	} else {
+		currentMatchedVolRules.clear();
+		volMatchDurationCounter = 0;
+	}
+
+	// 2. SRTLA Bitrate-based Automation (Scene Auto-Switcher & KBPS Source Visibility)
 	if ((!enabled || rules.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
 		currentMatchedRuleIndex = -1;
 		matchDurationCounter = 0;
@@ -1161,9 +1566,6 @@ void SrtlaAutoSwitcher::checkBitrate()
 		visMatchDurationCounter = 0;
 		return;
 	}
-
-	int delay = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
-	int visDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
 
 	// Fetch stats
 	bool is_listening = false;
@@ -1205,14 +1607,16 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 				uint64_t cBytes = cObj["bytes"].toVariant().toULongLong();
 				uint64_t cPrevBytes = previousBytes.value(connIdStr, cBytes);
-				if (cBytes < cPrevBytes) { cPrevBytes = cBytes; }
+				if (cBytes < cPrevBytes) {
+					cPrevBytes = cBytes;
+				}
 				previousBytes[connIdStr] = cBytes;
 
 				// We check every 1 second here
 				double cKbps = ((cBytes - cPrevBytes) * 8.0) / 1000.0 / 1.0;
 				calculatedSumKbps += cKbps;
 			}
-			
+
 			totalKbps += calculatedSumKbps;
 			activeGroupsWithData++;
 		}
@@ -1245,7 +1649,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 			// Find matching rule
 			int matchedRule = -1;
 			for (int i = 0; i < rules.size(); i++) {
-				if (totalKbps >= rules[i].minKbps && (rules[i].maxKbps == 0 || totalKbps < rules[i].maxKbps)) {
+				if (totalKbps >= rules[i].minKbps &&
+				    (rules[i].maxKbps == 0 || totalKbps < rules[i].maxKbps)) {
 					matchedRule = i;
 					break; // Stop at first match
 				}
@@ -1259,7 +1664,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 			if (currentMatchedRuleIndex >= 0) {
 				matchDurationCounter++;
-				if (matchDurationCounter >= delay && currentMatchedRuleIndex != currentlyAppliedRuleIndex) {
+				if (matchDurationCounter >= delay &&
+				    currentMatchedRuleIndex != currentlyAppliedRuleIndex) {
 					// Apply rule
 					const AutoSwitchRule &rule = rules[currentMatchedRuleIndex];
 
@@ -1286,11 +1692,13 @@ void SrtlaAutoSwitcher::checkBitrate()
 								if (targetSceneSrc) {
 									obs_frontend_set_current_scene(targetSceneSrc);
 									obs_source_release(targetSceneSrc);
-									currentlyAppliedRuleIndex = currentMatchedRuleIndex;
+									currentlyAppliedRuleIndex =
+										currentMatchedRuleIndex;
 								}
 							} else {
 								// Already on the target scene, just update index
-								currentlyAppliedRuleIndex = currentMatchedRuleIndex;
+								currentlyAppliedRuleIndex =
+									currentMatchedRuleIndex;
 							}
 						}
 						obs_source_release(currScene);
@@ -1300,17 +1708,18 @@ void SrtlaAutoSwitcher::checkBitrate()
 				// No rules match (bitrate is outside of all configured low-bitrate ranges, i.e., recovered)
 
 				int recoveryDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay");
-				if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "RecoveryDelay")) {
+				if (!config_has_user_value(global_config, "SRTLA_AutoSwitch",
+							   "RecoveryDelay")) {
 					recoveryDelay = 4;
 				}
-				
+
 				int totalRecoveryDelay = delay + recoveryDelay;
 
 				matchDurationCounter++;
 				if (matchDurationCounter >= totalRecoveryDelay && currentlyAppliedRuleIndex != -1) {
 					if (!originalSceneName.isEmpty()) {
-						obs_source_t *prevSceneSrc =
-							obs_get_source_by_name(originalSceneName.toUtf8().constData());
+						obs_source_t *prevSceneSrc = obs_get_source_by_name(
+							originalSceneName.toUtf8().constData());
 						if (prevSceneSrc) {
 							obs_frontend_set_current_scene(prevSceneSrc);
 							obs_source_release(prevSceneSrc);
@@ -1419,7 +1828,7 @@ extern "C" void setup_srtla_menu()
 		dialog.exec();
 	});
 
-	QAction *autoSwitchAction = srtlaMenu->addAction("Auto-Switch Settings...");
+	QAction *autoSwitchAction = srtlaMenu->addAction("Automation Settings...");
 	QObject::connect(autoSwitchAction, &QAction::triggered, [mainWindow]() {
 		SrtlaAutoSwitchDialog dialog(mainWindow);
 		dialog.exec();
@@ -1748,6 +2157,8 @@ void SrtlaMultistreamDialog::saveSettings()
 
 SrtlaMultistreamDock::SrtlaMultistreamDock(QWidget *parent) : QDockWidget("Multistream Status", parent)
 {
+	setObjectName("srtla_multistream_dock");
+
 	QWidget *central = new QWidget(this);
 	QVBoxLayout *layout = new QVBoxLayout(central);
 

@@ -45,6 +45,7 @@ struct srtla_source {
 	uint64_t last_original_ts;
 	
 	uint64_t last_audio_time;
+	uint64_t last_video_time;
 	uint64_t connected_since;
 	uint64_t starved_since;
 	uint64_t last_recovery_time;
@@ -71,18 +72,17 @@ bool srtla_is_audio_starved(int listen_port) {
 			int groups = srtla_get_group_count_by_port(curr->listen_port);
 			if (groups > 0) {
 				uint64_t now = os_gettime_ns();
-				// 1. Connected for >3s but zero audio packets ever received
+				// Only flag starved if video is active for >12s with zero audio ever received,
+				// or if audio was active and completely stopped for >= 8s while video is active,
+				// or if audio is severely degraded (< 30kHz) for >= 6s.
 				if (curr->last_audio_time == 0) {
-					if (curr->connected_since > 0 && (now - curr->connected_since >= 3000000000ULL)) {
+					if (curr->last_video_time > 0 && curr->connected_since > 0 &&
+					    (now - curr->connected_since >= 12000000000ULL)) {
 						starved = true;
 					}
-				}
-				// 2. Audio stopped receiving for >= 2s
-				else if (now - curr->last_audio_time >= 2000000000ULL) {
+				} else if (curr->last_video_time > 0 && (now - curr->last_audio_time >= 8000000000ULL)) {
 					starved = true;
-				}
-				// 3. Audio actively receiving but starved / degraded (< 40kHz)
-				else if (curr->current_stream_hz > 0 && curr->current_stream_hz < 40000.0) {
+				} else if (curr->current_stream_hz > 0 && curr->current_stream_hz < 30000.0) {
 					starved = true;
 				}
 			}
@@ -104,6 +104,12 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 {
 	UNUSED_PARAMETER(source);
 	struct srtla_source *context = param;
+	if (!context || !audio_data) return;
+
+	uint64_t now = os_gettime_ns();
+	context->last_audio_time = now;
+	context->recovery_attempts = 0;
+
 	if (muted) return;
 
 	struct obs_audio_info aoi;
@@ -117,10 +123,6 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 		out.data[i] = audio_data->data[i];
 	}
 	out.frames = audio_data->frames;
-
-	uint64_t now = os_gettime_ns();
-	context->last_audio_time = now;
-	context->recovery_attempts = 0;
 
 	// Monotonic sample-accurate timestamp smoothing to eliminate jitter-induced drops in OBS
 	uint64_t sample_rate = (out.samples_per_sec > 0) ? (uint64_t)out.samples_per_sec : 48000ULL;
@@ -322,8 +324,7 @@ void srtla_reload_media_source(void *data)
 #endif
 		struct srtla_source *context = data;
 		if (!context) return;
-		obs_log(LOG_INFO, "[SRTLA] Reloading internal media player for port %d and resetting SRTLA group to trigger sender auto-reconnect...", context->listen_port);
-		srtla_reset_group_by_port(context->listen_port);
+		obs_log(LOG_INFO, "[SRTLA] Reloading internal media player for port %d to resync stream...", context->listen_port);
 		srtla_create_media_source(context);
 #ifdef _WIN32
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -495,6 +496,9 @@ static void srtla_source_video_render(void *data, gs_effect_t *effect)
 	
 	if (context->media_source) {
 		obs_source_video_render(context->media_source);
+		if (obs_source_get_base_width(context->media_source) > 0) {
+			context->last_video_time = os_gettime_ns();
+		}
 	}
 }
 
@@ -699,62 +703,57 @@ void srtla_auto_recover_hung_sources()
 				s->recovery_attempts = 0;
 			}
 
-			// Check if we are in cooldown from a recent recovery action (3.5s cooldown)
-			bool in_cooldown = (s->last_recovery_time > 0 && (now - s->last_recovery_time < 3500000000ULL));
+			// Cooldown of at least 10 seconds between recovery actions
+			bool in_cooldown = (s->last_recovery_time > 0 && (now - s->last_recovery_time < 10000000000ULL));
 
-			// Condition A: No audio received on initial connection (>3.5s since connection with 0 audio)
-			bool missing_on_connect = (s->last_audio_time == 0 && (now - s->connected_since >= 3500000000ULL));
+			// Condition A: Video has been rendering for >= 12s, but zero audio packets ever arrived
+			bool missing_on_connect = (s->last_audio_time == 0 && s->last_video_time > 0 &&
+						   (now - s->connected_since >= 12000000000ULL) &&
+						   (now - s->last_video_time < 2000000000ULL));
 
-			// Condition B: Audio completely dropped mid-stream (>3.5s since last audio frame)
-			bool audio_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time >= 3500000000ULL));
+			// Condition B: Audio was receiving normally, but completely stopped for >= 8s while video is still active
+			bool audio_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time >= 8000000000ULL) &&
+					      s->last_video_time > 0 && (now - s->last_video_time < 2000000000ULL));
 
-			// Condition C: Audio starved / desynced (< 40kHz for > 2.5s)
+			// Condition C: Audio severely starved (< 30kHz) continuously for >= 6s
 			bool audio_starved = false;
 			if (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) &&
-			    s->current_stream_hz > 0 && s->current_stream_hz < 40000.0) {
+			    s->current_stream_hz > 0 && s->current_stream_hz < 30000.0) {
 				if (s->starved_since == 0) {
 					s->starved_since = now;
-				} else if (now - s->starved_since >= 2500000000ULL) {
+				} else if (now - s->starved_since >= 6000000000ULL) {
 					audio_starved = true;
 				}
 			} else {
 				s->starved_since = 0;
 			}
 
-			if (!in_cooldown && (missing_on_connect || audio_dropped || audio_starved)) {
+			// Only attempt auto-recovery up to 2 times to avoid looping on video-only or mic-less streams
+			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved)) {
 				s->recovery_attempts++;
 				s->last_recovery_time = now;
 				s->starved_since = 0;
 
-				// If 3 or more reload attempts failed to bring audio back (~12s without audio), escalate to full restart
-				if (s->recovery_attempts >= 3) {
+				if (missing_on_connect) {
 					obs_log(LOG_WARNING,
-						"[SRTLA] Port %d audio missing/starved after %d reload attempts! Escalating to full source restart.",
+						"[SRTLA] Port %d video active for >12s but no audio received! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, s->recovery_attempts);
-					s->pending_recovery = RECOVERY_RESTART;
-					s->recovery_attempts = 0;
-					restart_count++;
+				} else if (audio_dropped) {
+					obs_log(LOG_WARNING,
+						"[SRTLA] Port %d audio stopped for >8s while video active! Auto-reloading media player (attempt %d/2).",
+						s->listen_port, s->recovery_attempts);
 				} else {
-					if (missing_on_connect) {
-						obs_log(LOG_WARNING,
-							"[SRTLA] Port %d connected for >3.5s but no audio received! Auto-reloading media player (attempt %d).",
-							s->listen_port, s->recovery_attempts);
-					} else if (audio_dropped) {
-						obs_log(LOG_WARNING,
-							"[SRTLA] Port %d active connection but audio stopped for >3.5s! Auto-reloading media player (attempt %d).",
-							s->listen_port, s->recovery_attempts);
-					} else {
-						obs_log(LOG_WARNING,
-							"[SRTLA] Port %d audio starved (%.1f Hz < 40kHz) for >2.5s! Auto-reloading media player (attempt %d).",
-							s->listen_port, s->current_stream_hz, s->recovery_attempts);
-					}
-					s->pending_recovery = RECOVERY_RELOAD;
-					reload_count++;
+					obs_log(LOG_WARNING,
+						"[SRTLA] Port %d audio starved (%.1f Hz < 30kHz) for >6s! Auto-reloading media player (attempt %d/2).",
+						s->listen_port, s->current_stream_hz, s->recovery_attempts);
 				}
+				s->pending_recovery = RECOVERY_RELOAD;
+				reload_count++;
 			}
 		} else {
 			// No active connections / groups: reset all connection & audio timers
 			s->connected_since = 0;
+			s->last_video_time = 0;
 			s->last_audio_time = 0;
 			s->starved_since = 0;
 			s->current_stream_hz = 0;

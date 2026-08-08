@@ -5,6 +5,8 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QMap>
+#include <QSplitter>
+#include <QSettings>
 
 #include <obs-frontend-api.h>
 
@@ -17,15 +19,13 @@ public:
 
 private slots:
 	void updateStatus();
+	void onSplitterMoved(int pos, int index);
 
 private:
-	QLabel *statusLabel;
-	QLabel *portLabel;
-	QLabel *encodersLabel;
-	QLabel *connectionsLabel;
-	QLabel *failedConnectionsLabel;
+	QLabel *metricsLabel;
 	class QTableWidget *receiversTable;
 	QTreeWidget *treeWidget;
+	QSplitter *splitter;
 	QTimer *updateTimer;
 
 	QMap<QString, uint64_t> previousBytes;
@@ -71,6 +71,20 @@ struct SourceVisibilityRule {
 	QString sourceName;
 };
 
+struct VolumeVisibilityRule {
+	QString audioSource;
+	int minDb;
+	int maxDb;
+	QString targetSource;
+};
+
+struct MonitoredAudioSource {
+	obs_volmeter_t *volmeter = nullptr;
+	obs_source_t *source = nullptr;
+	float lastDb = -100.0f;
+	uint64_t lastUpdateTime = 0;
+};
+
 class QListWidget;
 
 class SrtlaAutoSwitchDialog : public QDialog {
@@ -83,6 +97,7 @@ private slots:
 	void saveSettings();
 	void addNewRule();
 	void addNewVisibilityRule();
+	void addNewVolumeRule();
 
 private:
 	QComboBox *enableAutoSwitch;
@@ -95,11 +110,17 @@ private:
 	QSpinBox *visSwitchDelay;
 	QTableWidget *visibilityRulesTable;
 
+	QComboBox *enableVolSwitch;
+	QSpinBox *volSwitchDelay;
+	QTableWidget *volumeRulesTable;
+
 	QStringList availableScenes;
 	QStringList availableSources;
+	QStringList availableAudioSources;
 
 	void addRuleRow(int minKbps, int maxKbps, const QString &targetScene);
 	void addVisibilityRuleRow(int minKbps, int maxKbps, const QString &sourceName);
+	void addVolumeRuleRow(const QString &audioSource, int minDb, int maxDb, const QString &targetSource);
 };
 
 class SrtlaAutoSwitcher : public QObject {
@@ -128,6 +149,7 @@ private:
 
 	QVector<AutoSwitchRule> rules;
 	QVector<SourceVisibilityRule> visibilityRules;
+	QVector<VolumeVisibilityRule> volumeRules;
 	QSet<QString> noFailoverScenes;
 	int currentMatchedRuleIndex;
 	int currentlyAppliedRuleIndex;
@@ -137,11 +159,21 @@ private:
 	QSet<int> currentlyAppliedVisRules;
 	int visMatchDurationCounter;
 
+	QMap<QString, MonitoredAudioSource *> monitoredAudioSources;
+	QSet<int> currentMatchedVolRules;
+	QSet<int> currentlyAppliedVolRules;
+	int volMatchDurationCounter;
+
 	QString originalSceneName;
 
 	void loadRules();
+	void updateMonitoredAudioSources();
+	void clearMonitoredAudioSources();
 
 	static void handleFrontendEvent(enum obs_frontend_event event, void *private_data);
+	static void volmeterCallback(void *param, const float magnitude[MAX_AUDIO_CHANNELS],
+				     const float peak[MAX_AUDIO_CHANNELS],
+				     const float input_peak[MAX_AUDIO_CHANNELS]);
 };
 
 class SrtlaWebInterfaceDialog : public QDialog {
