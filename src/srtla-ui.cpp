@@ -26,6 +26,8 @@
 #include <QMessageBox>
 
 #include <plugin-support.h>
+#include <cmath>
+#include <utility>
 
 extern "C" {
 void srtla_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
@@ -1238,22 +1240,24 @@ void SrtlaAutoSwitcher::volmeterCallback(void *param, const float magnitude[MAX_
 		return;
 	}
 
-	float max_peak = 0.0f;
+	float frame_max = -100.0f;
 	for (int c = 0; c < MAX_AUDIO_CHANNELS; c++) {
-		if (peak[c] > max_peak) {
-			max_peak = peak[c];
+		float p = peak[c];
+		if (!std::isnan(p) && !std::isinf(p)) {
+			if (p > frame_max) {
+				frame_max = p;
+			}
 		}
 	}
 
-	if (max_peak > 0.0000001f) {
-		float db = obs_mul_to_db(max_peak);
-		if (db < -100.0f)
-			db = -100.0f;
-		if (db > 0.0f)
-			db = 0.0f;
-		mas->lastDb = db;
-	} else {
-		mas->lastDb = -100.0f;
+	if (frame_max > 0.0f)
+		frame_max = 0.0f;
+	if (frame_max < -100.0f)
+		frame_max = -100.0f;
+
+	// Keep track of the highest peak level in the current measurement interval
+	if (frame_max > mas->lastDb) {
+		mas->lastDb = frame_max;
 	}
 	mas->lastUpdateTime = os_gettime_ns();
 }
@@ -1317,8 +1321,8 @@ void SrtlaAutoSwitcher::updateMonitoredAudioSources()
 				mas->lastUpdateTime = os_gettime_ns();
 				mas->volmeter = obs_volmeter_create(OBS_FADER_LOG);
 				if (mas->volmeter) {
-					obs_volmeter_attach_source(mas->volmeter, src);
 					obs_volmeter_add_callback(mas->volmeter, volmeterCallback, mas);
+					obs_volmeter_attach_source(mas->volmeter, src);
 				}
 				monitoredAudioSources.insert(srcName, mas);
 			}
@@ -1449,6 +1453,52 @@ void SrtlaAutoSwitcher::stop()
 	clearMonitoredAudioSources();
 }
 
+static void set_target_source_visibility_all_scenes(const QString &targetName, bool visible)
+{
+	struct obs_frontend_source_list scenes = {};
+	obs_frontend_get_scenes(&scenes);
+
+	std::pair<QString, bool> paramPair(targetName, visible);
+
+	for (size_t i = 0; i < scenes.sources.num; i++) {
+		obs_source_t *scene_source = scenes.sources.array[i];
+		obs_scene_t *scene = obs_scene_from_source(scene_source);
+		if (scene) {
+			obs_scene_enum_items(
+				scene,
+				[](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+					auto data = static_cast<std::pair<QString, bool> *>(param);
+					if (obs_sceneitem_is_group(item)) {
+						obs_scene_t *groupScene = obs_group_from_source(obs_sceneitem_get_source(item));
+						if (groupScene) {
+							obs_scene_enum_items(
+								groupScene,
+								[](obs_scene_t *, obs_sceneitem_t *childItem, void *childParam) {
+									auto childData = static_cast<std::pair<QString, bool> *>(childParam);
+									obs_source_t *childSrc = obs_sceneitem_get_source(childItem);
+									const char *name = obs_source_get_name(childSrc);
+									if (name && QString::fromUtf8(name) == childData->first) {
+										obs_sceneitem_set_visible(childItem, childData->second);
+									}
+									return true;
+								},
+								data);
+						}
+					}
+
+					obs_source_t *src = obs_sceneitem_get_source(item);
+					const char *name = obs_source_get_name(src);
+					if (name && QString::fromUtf8(name) == data->first) {
+						obs_sceneitem_set_visible(item, data->second);
+					}
+					return true;
+				},
+				&paramPair);
+		}
+	}
+	obs_frontend_source_list_free(&scenes);
+}
+
 void SrtlaAutoSwitcher::checkBitrate()
 {
 	config_t *global_config = obs_frontend_get_profile_config();
@@ -1485,25 +1535,29 @@ void SrtlaAutoSwitcher::checkBitrate()
 		QSet<int> matchedVolRules;
 		uint64_t now = os_gettime_ns();
 
+		QMap<QString, float> sourceDbMap;
+		for (auto it = monitoredAudioSources.begin(); it != monitoredAudioSources.end(); ++it) {
+			QString srcKey = it.key();
+			MonitoredAudioSource *mas = it.value();
+			float db = -100.0f;
+			if (mas) {
+				if (mas->source && obs_source_muted(mas->source)) {
+					db = -100.0f;
+				} else if (now - mas->lastUpdateTime > 1500000000ULL) {
+					db = -100.0f;
+				} else {
+					db = mas->lastDb;
+				}
+				// Reset peak for the next 1s measurement interval
+				mas->lastDb = -100.0f;
+			}
+			sourceDbMap[srcKey] = db;
+		}
+
 		for (int i = 0; i < volumeRules.size(); i++) {
 			const VolumeVisibilityRule &r = volumeRules[i];
-			float currentDb = -100.0f;
 			QString srcKey = r.audioSource.trimmed();
-
-			if (monitoredAudioSources.contains(srcKey)) {
-				MonitoredAudioSource *mas = monitoredAudioSources[srcKey];
-				if (mas) {
-					if (mas->source && obs_source_muted(mas->source)) {
-						currentDb = -100.0f;
-					} else if (now - mas->lastUpdateTime > 1500000000ULL) {
-						currentDb = -100.0f;
-					} else {
-						currentDb = mas->lastDb;
-					}
-				}
-			} else {
-				currentDb = -100.0f;
-			}
+			float currentDb = sourceDbMap.value(srcKey, -100.0f);
 
 			if (currentDb >= r.minDb && currentDb <= r.maxDb) {
 				matchedVolRules.insert(i);
@@ -1533,23 +1587,10 @@ void SrtlaAutoSwitcher::checkBitrate()
 					targetsToShow.insert(volumeRules[index].targetSource.trimmed());
 			}
 
-			struct obs_frontend_source_list scenes = {};
-			obs_frontend_get_scenes(&scenes);
-			for (size_t i = 0; i < scenes.sources.num; i++) {
-				obs_source_t *scene_source = scenes.sources.array[i];
-				obs_scene_t *scene = obs_scene_from_source(scene_source);
-				if (scene) {
-					for (const auto &targetName : allRuleTargets) {
-						obs_sceneitem_t *item = obs_scene_find_source_recursive(
-							scene, targetName.toUtf8().constData());
-						if (item) {
-							bool shouldShow = targetsToShow.contains(targetName);
-							obs_sceneitem_set_visible(item, shouldShow);
-						}
-					}
-				}
+			for (const auto &targetName : allRuleTargets) {
+				bool shouldShow = targetsToShow.contains(targetName);
+				set_target_source_visibility_all_scenes(targetName, shouldShow);
 			}
-			obs_frontend_source_list_free(&scenes);
 
 			currentlyAppliedVolRules = currentMatchedVolRules;
 		}
@@ -1756,31 +1797,20 @@ void SrtlaAutoSwitcher::checkBitrate()
 			// Find all unique source names in rules to hide them by default
 			QSet<QString> allRuleSources;
 			for (const auto &r : visibilityRules) {
-				allRuleSources.insert(r.sourceName);
+				if (!r.sourceName.trimmed().isEmpty())
+					allRuleSources.insert(r.sourceName.trimmed());
 			}
 
 			QSet<QString> sourcesToShow;
 			for (int index : currentMatchedVisRules) {
-				sourcesToShow.insert(visibilityRules[index].sourceName);
+				if (!visibilityRules[index].sourceName.trimmed().isEmpty())
+					sourcesToShow.insert(visibilityRules[index].sourceName.trimmed());
 			}
 
-			struct obs_frontend_source_list scenes = {};
-			obs_frontend_get_scenes(&scenes);
-			for (size_t i = 0; i < scenes.sources.num; i++) {
-				obs_source_t *scene_source = scenes.sources.array[i];
-				obs_scene_t *scene = obs_scene_from_source(scene_source);
-				if (scene) {
-					for (const auto &sourceName : allRuleSources) {
-						obs_sceneitem_t *item = obs_scene_find_source_recursive(
-							scene, sourceName.toUtf8().constData());
-						if (item) {
-							bool shouldShow = sourcesToShow.contains(sourceName);
-							obs_sceneitem_set_visible(item, shouldShow);
-						}
-					}
-				}
+			for (const auto &sourceName : allRuleSources) {
+				bool shouldShow = sourcesToShow.contains(sourceName);
+				set_target_source_visibility_all_scenes(sourceName, shouldShow);
 			}
-			obs_frontend_source_list_free(&scenes);
 
 			currentlyAppliedVisRules = currentMatchedVisRules;
 		}

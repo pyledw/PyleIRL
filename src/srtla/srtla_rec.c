@@ -21,6 +21,7 @@
 #include <string.h>
 #ifndef _WIN32
 #include <unistd.h> 
+#include <fcntl.h>
 #else
 #include <io.h>
 #endif
@@ -49,6 +50,8 @@ static inline int get_addr_len(const struct sockaddr *addr) {
 #define RECVFROM(sock, buf, len, flags, addr, addrlen) recvfrom(sock, (char *)(buf), len, flags, addr, addrlen)
 #else
 #include <sys/socket.h>
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <machine/endian.h>
 #include <libkern/OSByteOrder.h>

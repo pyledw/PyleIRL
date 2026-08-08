@@ -25,6 +25,8 @@
 #define be32toh(x) ntohl(x)
 typedef unsigned long in_addr_t; // Define in_addr_t for Windows
 #else
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #ifdef __APPLE__
 #include <machine/endian.h>

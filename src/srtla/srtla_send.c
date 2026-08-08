@@ -31,6 +31,7 @@ typedef int socklen_t;
 #define close closesocket
 #else
 #include <unistd.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
