@@ -14,6 +14,10 @@
 #include "srtla-ui.hpp"
 #include "multistream.hpp"
 #include <QJsonArray>
+#include <QTcpSocket>
+#include <QCryptographicHash>
+#include <QElapsedTimer>
+#include <QStandardPaths>
 extern "C" {
 void srtla_proxy_settings_changed();
 void srtla_get_all_receivers_json(char *out_buffer, int max_len);
@@ -174,7 +178,207 @@ static void handle_api_obs_ws_config(const httplib::Request &req, httplib::Respo
 #include <QDir>
 #include <QTemporaryFile>
 #include <QTextStream>
-#include <QCoreApplication>
+static QString fetch_obs_websocket_screenshot(const QString &sourceName)
+{
+    int port = 0;
+    QString password = "";
+    
+    // Try obs-websocket config.json directly (OBS 30+)
+    QString configPath = qEnvironmentVariable("APPDATA") + "/obs-studio/plugin_config/obs-websocket/config.json";
+    blog(LOG_INFO, "[PyleIRL Web] Checking OBS WebSocket config at: %s", configPath.toUtf8().constData());
+    QFile file(configPath);
+    if (file.open(QIODevice::ReadOnly)) {
+        QByteArray raw = file.readAll();
+        blog(LOG_INFO, "[PyleIRL Web] Raw WebSocket config JSON: %s", raw.constData());
+        QJsonObject obj = QJsonDocument::fromJson(raw).object();
+        
+        if (obj.contains("ServerPort")) port = obj["ServerPort"].toInt();
+        else if (obj.contains("server_port")) port = obj["server_port"].toInt();
+        else if (obj.contains("serverPort")) port = obj["serverPort"].toInt();
+
+        if (obj.contains("ServerPassword")) password = obj["ServerPassword"].toString();
+        else if (obj.contains("server_password")) password = obj["server_password"].toString();
+        else if (obj.contains("serverPassword")) password = obj["serverPassword"].toString();
+
+        blog(LOG_INFO, "[PyleIRL Web] Parsed WebSocket config: Port=%d", port);
+    } else {
+        blog(LOG_WARNING, "[PyleIRL Web] Could not open WebSocket config file");
+    }
+    
+    // Try global_config (OBS 30 earlier)
+    if (port <= 0) {
+        config_t *global_config = obs_frontend_get_global_config();
+        if (global_config) {
+            port = config_get_int(global_config, "OBSWebSocket", "ServerPort");
+            const char *pwd = config_get_string(global_config, "OBSWebSocket", "ServerPassword");
+            if (pwd && strlen(pwd) > 0) password = QString(pwd);
+        }
+    }
+    
+    // Try profile_config (OBS 28)
+    if (port <= 0) {
+        config_t *profile_config = obs_frontend_get_profile_config();
+        if (profile_config) {
+            port = config_get_int(profile_config, "OBSWebSocket", "ServerPort");
+            const char *pwd = config_get_string(profile_config, "OBSWebSocket", "ServerPassword");
+            if (pwd && strlen(pwd) > 0) password = QString(pwd);
+        }
+    }
+
+    if (port <= 0) port = 4455;
+
+    QTcpSocket socket;
+    socket.connectToHost("127.0.0.1", port);
+    if (!socket.waitForConnected(2000)) {
+        blog(LOG_WARNING, "[PyleIRL Web] Failed to connect to WebSocket on port %d", port);
+        return "";
+    }
+
+    QString handshake = QString("GET / HTTP/1.1\r\n"
+                                "Host: 127.0.0.1:%1\r\n"
+                                "Upgrade: websocket\r\n"
+                                "Connection: Upgrade\r\n"
+                                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                                "Sec-WebSocket-Version: 13\r\n\r\n").arg(port);
+    socket.write(handshake.toUtf8());
+    socket.waitForBytesWritten(1000);
+
+    QByteArray buffer;
+    QElapsedTimer timer;
+    timer.start();
+    bool handshake_done = false;
+
+    auto read_frame = [&](QJsonObject &outJson, const char* step) -> bool {
+        while (timer.elapsed() < 3000) {
+            if (socket.bytesAvailable() > 0) buffer.append(socket.readAll());
+            if (!handshake_done) {
+                int endIdx = buffer.indexOf("\r\n\r\n");
+                if (endIdx != -1) {
+                    buffer.remove(0, endIdx + 4);
+                    handshake_done = true;
+                }
+            }
+            if (handshake_done && buffer.size() >= 2) {
+                uint8_t payload_len = buffer[1] & 0x7F;
+                int header_size = 2;
+                uint64_t actual_len = payload_len;
+                if (payload_len == 126) {
+                    if (buffer.size() < 4) goto wait_more;
+                    header_size = 4;
+                    actual_len = ((uint8_t)buffer[2] << 8) | (uint8_t)buffer[3];
+                } else if (payload_len == 127) {
+                    if (buffer.size() < 10) goto wait_more;
+                    header_size = 10;
+                    actual_len = 0;
+                    for (int i=0; i<8; i++) actual_len = (actual_len << 8) | (uint8_t)buffer[2+i];
+                }
+                if (buffer.size() >= header_size + (int)actual_len) {
+                    QByteArray payload = buffer.mid(header_size, actual_len);
+                    buffer.remove(0, header_size + actual_len);
+                    outJson = QJsonDocument::fromJson(payload).object();
+                    return true;
+                }
+            }
+        wait_more:
+            socket.waitForReadyRead(100);
+        }
+        blog(LOG_WARNING, "[PyleIRL Web] Timeout reading frame during: %s", step);
+        return false;
+    };
+
+    QJsonObject helloPayload;
+    if (!read_frame(helloPayload, "Hello")) return "";
+
+    QJsonObject identifyPayload;
+    identifyPayload["op"] = 1;
+    QJsonObject dObj;
+    dObj["rpcVersion"] = 1;
+
+    if (helloPayload.contains("d") && helloPayload["d"].toObject().contains("authentication") && !password.isEmpty()) {
+        QJsonObject authObj = helloPayload["d"].toObject()["authentication"].toObject();
+        QString challenge = authObj["challenge"].toString();
+        QString salt = authObj["salt"].toString();
+
+        QByteArray secret = QCryptographicHash::hash((password + salt).toUtf8(), QCryptographicHash::Sha256).toBase64();
+        QByteArray authResponse = QCryptographicHash::hash((secret + challenge.toUtf8()), QCryptographicHash::Sha256).toBase64();
+        dObj["authentication"] = QString(authResponse);
+    }
+    identifyPayload["d"] = dObj;
+
+    auto send_frame = [&](const QJsonObject &obj) {
+        QByteArray payload = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+        QByteArray frame;
+        frame.append((char)0x81);
+        if (payload.size() < 126) {
+            frame.append((char)(payload.size() | 0x80));
+        } else if (payload.size() <= 65535) {
+            frame.append((char)(126 | 0x80));
+            frame.append((char)((payload.size() >> 8) & 0xFF));
+            frame.append((char)(payload.size() & 0xFF));
+        } else {
+            frame.append((char)(127 | 0x80));
+            for (int i=7; i>=0; i--) frame.append((char)((payload.size() >> (i*8)) & 0xFF));
+        }
+        QByteArray mask = "ABCD";
+        frame.append(mask);
+        for (int i=0; i<payload.size(); i++) frame.append((char)(payload[i] ^ mask[i % 4]));
+        socket.write(frame);
+        socket.waitForBytesWritten(1000);
+    };
+
+    send_frame(identifyPayload);
+
+    QJsonObject identifiedPayload;
+    if (!read_frame(identifiedPayload, "Identified")) return "";
+    if (identifiedPayload["op"].toInt() != 2) {
+        blog(LOG_WARNING, "[PyleIRL Web] Auth failed or unexpected op: %d", identifiedPayload["op"].toInt());
+        return "";
+    }
+
+    QJsonObject reqPayload;
+    reqPayload["op"] = 6;
+    QJsonObject reqD;
+    reqD["requestType"] = "GetSourceScreenshot";
+    reqD["requestId"] = "req_1";
+    QJsonObject reqData;
+    reqData["sourceName"] = sourceName;
+    reqData["imageFormat"] = "jpeg";
+    reqData["imageWidth"] = 640;
+    reqData["imageHeight"] = 360;
+    reqData["imageCompressionQuality"] = 45;
+    reqD["requestData"] = reqData;
+    reqPayload["d"] = reqD;
+    
+    send_frame(reqPayload);
+
+    QJsonObject resPayload;
+    if (!read_frame(resPayload, "Response")) return "";
+
+    if (resPayload["op"].toInt() == 7) {
+        QJsonObject d = resPayload["d"].toObject();
+        QJsonObject status = d["requestStatus"].toObject();
+        if (status["result"].toBool()) {
+            return d["responseData"].toObject()["imageData"].toString();
+        } else {
+            blog(LOG_WARNING, "[PyleIRL Web] GetSourceScreenshot failed: %s", status["code"].toVariant().toString().toUtf8().constData());
+        }
+    } else {
+        blog(LOG_WARNING, "[PyleIRL Web] Unexpected response op: %d", resPayload["op"].toInt());
+    }
+    return "";
+}
+
+static void handle_api_obs_screenshot(const httplib::Request &req, httplib::Response &res)
+{
+    REQUIRE_AUTH(req, res)
+    QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(req.body));
+    QString sourceName = doc.object()["sourceName"].toString();
+    QString img = fetch_obs_websocket_screenshot(sourceName);
+
+    QJsonObject obj;
+    if (!img.isEmpty()) obj["imageData"] = img;
+    res.set_content(QJsonDocument(obj).toJson(QJsonDocument::Compact).toStdString(), "application/json");
+}
 
 static void handle_api_restart(const httplib::Request &req, httplib::Response &res)
 {
@@ -727,7 +931,8 @@ void srtla_web_server_start(int port)
 
 	svr->Get("/api/settings", handle_api_settings_get);
 	svr->Post("/api/settings", handle_api_settings_post);
-	svr->Get("/api/obs_ws_config", handle_api_obs_ws_config);
+	svr->Post("/api/obs/screenshot", handle_api_obs_screenshot);
+	svr->Get("/api/obs/ws_config", handle_api_obs_ws_config);
 	svr->Post("/api/restart", handle_api_restart);
 	svr->Get("/api/stream_key", handle_api_stream_key_get);
 	svr->Post("/api/stream_key", handle_api_stream_key_post);

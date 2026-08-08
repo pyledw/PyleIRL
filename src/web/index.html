@@ -514,11 +514,7 @@
         }
 
         async function relayRequest(action, data = {}, method = 'POST') {
-            // 1. Try PHP Relay endpoint first
-            let res = await apiCall(`obs_relay.php?action=${encodeURIComponent(action)}`, method, method === 'POST' ? data : null);
-            if (res && res.status !== undefined) return res;
-
-            // 2. Fallback to native plugin HTTP server /api/ endpoints
+            // Map actions to native plugin HTTP server /api/ endpoints
             if (action === 'get_overview') return await apiCall('/api/obs/overview');
             if (action === 'set_current_scene') return await apiCall('/api/obs/set_scene', 'POST', data);
             if (action === 'set_scene_item_enabled') return await apiCall('/api/obs/set_source_visibility', 'POST', data);
@@ -660,59 +656,9 @@
             }
         }
 
-        let obsWs = null;
-        let obsWsReqId = 1;
-        let obsWsCallbacks = {};
-
-        function getOBSWebSocket() {
-            return new Promise((resolve, reject) => {
-                if (obsWs && obsWs.readyState === WebSocket.OPEN) {
-                    resolve(obsWs);
-                    return;
-                }
-                if (obsWs && obsWs.readyState === WebSocket.CONNECTING) {
-                    setTimeout(() => getOBSWebSocket().then(resolve).catch(reject), 100);
-                    return;
-                }
-                obsWs = new WebSocket(`ws://${window.location.hostname}:4455`);
-                obsWs.onopen = () => { };
-                obsWs.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.op === 0) {
-                        obsWs.send(JSON.stringify({ op: 1, d: { rpcVersion: 1 } }));
-                    } else if (data.op === 2) {
-                        resolve(obsWs);
-                    } else if (data.op === 7) {
-                        const cb = obsWsCallbacks[data.d.requestId];
-                        if (cb) {
-                            cb(data.d.responseData);
-                            delete obsWsCallbacks[data.d.requestId];
-                        }
-                    }
-                };
-                obsWs.onerror = (e) => reject(e);
-            });
-        }
-
-        function obsWsRequest(requestType, requestData = {}) {
-            return getOBSWebSocket().then(ws => {
-                return new Promise((resolve, reject) => {
-                    const reqId = "req_" + (obsWsReqId++);
-                    obsWsCallbacks[reqId] = resolve;
-                    ws.send(JSON.stringify({ op: 6, d: { requestType, requestId: reqId, requestData } }));
-                    setTimeout(() => {
-                        if (obsWsCallbacks[reqId]) {
-                            delete obsWsCallbacks[reqId];
-                            reject("Timeout");
-                        }
-                    }, 3000);
-                });
-            }).catch(e => { return null; });
-        }
-
         async function pollPreview() {
             if (!isConnected || !currentScene) return;
-            const res = await obsWsRequest('GetSourceScreenshot', { sourceName: currentScene, imageFormat: 'jpeg', imageWidth: 640, imageHeight: 360, imageCompressionQuality: 45 });
+            const res = await apiCall('/api/obs/screenshot', 'POST', { sourceName: currentScene });
             if (res && res.imageData) {
                 const img = document.getElementById('preview-image');
                 img.src = res.imageData;
