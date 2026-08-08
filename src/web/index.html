@@ -45,6 +45,7 @@
             max-width: 900px;
             border-bottom: 1px solid rgba(255,255,255,0.1);
             padding-bottom: 10px;
+            overflow-x: auto;
         }
 
         .tab {
@@ -53,6 +54,7 @@
             border-radius: 6px;
             transition: 0.3s;
             font-weight: bold;
+            white-space: nowrap;
         }
 
         .tab:hover { background: rgba(255,255,255,0.1); }
@@ -111,6 +113,8 @@
         .btn-danger:hover { box-shadow: 0 0 15px rgba(255, 71, 87, 0.4); }
         .btn-warning { background: var(--warning); color: black; }
         .btn-warning:hover { box-shadow: 0 0 15px rgba(255, 165, 2, 0.4); }
+        .btn-outline { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+        .btn-outline:hover { background: var(--accent); color: black; }
 
         .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
         .status.connected { background: var(--success); box-shadow: 0 0 8px var(--success); }
@@ -120,10 +124,10 @@
         .scene-btn {
             background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.1);
             color: var(--text-main); padding: 15px; text-align: center; border-radius: 8px;
-            cursor: pointer; transition: all 0.2s;
+            cursor: pointer; transition: all 0.2s; user-select: none;
         }
         .scene-btn:hover { background: rgba(255, 255, 255, 0.1); border-color: var(--accent); }
-        .scene-btn.active { background: var(--accent); color: #000; box-shadow: 0 0 15px var(--accent-glow); border-color: var(--accent); }
+        .scene-btn.active { background: var(--accent); color: #000; box-shadow: 0 0 15px var(--accent-glow); border-color: var(--accent); font-weight: bold; }
 
         .preview-container {
             width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px;
@@ -146,7 +150,6 @@
         table { width: 100%; border-collapse: collapse; margin-top: 15px; }
         th, td { padding: 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
         th { background: rgba(0,0,0,0.3); }
-        
     </style>
 </head>
 <body>
@@ -155,7 +158,7 @@
         <div class="panel" style="width: 320px; text-align:center;">
             <h2 style="margin-bottom:15px;">Web Interface Locked</h2>
             <div style="margin-bottom:20px;">
-                <input type="password" id="login-password" placeholder="Access Password" style="width:100%;" onkeydown="if(event.key === 'Enter') submitLogin()">
+                <input type="password" id="login-password" placeholder="Access Password" style="width:100%; box-sizing:border-box;" onkeydown="if(event.key === 'Enter') submitLogin()">
             </div>
             <button onclick="submitLogin()" style="width:100%; font-size:1.1rem; padding:10px;">Login</button>
         </div>
@@ -176,30 +179,23 @@
     <div id="tab-dashboard" class="tab-content active">
         <div class="panel">
             <h2>OBS Status & Control</h2>
-            <div style="margin-bottom: 15px; display:flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <span class="status disconnected" id="ws-status-indicator"></span>
-                    <span id="ws-status-text">Disconnected</span>
+            <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; align-items:center;">
+                    <span class="status disconnected" id="obs-status-indicator"></span>
+                    <span id="obs-status-text" style="font-weight:500;">Connecting to OBS...</span>
                 </div>
-                <div style="display:flex; gap:10px;">
+                <div style="display:flex; gap:10px; align-items:center;">
                     <div id="obs-stream-status" style="display:none; align-items:center; gap:10px; background:rgba(0,0,0,0.2); padding:5px 15px; border-radius:5px;">
                         <span id="obs-stream-indicator" class="status disconnected"></span>
                         <span id="obs-stream-text" style="font-weight:bold;">OFFLINE</span>
-                        <button id="obs-stream-btn" onclick="toggleOBSStream()" style="padding:5px 15px; font-weight:bold;"></button>
+                        <button id="obs-stream-btn" onclick="toggleOBSStream()" style="padding:5px 15px; font-weight:bold;">Start Stream</button>
                     </div>
-                    <button class="btn-danger" id="ws-disconnect-btn" onclick="disconnectOBS()" style="display:none;">Disconnect WS</button>
                     <button class="btn-warning" onclick="restartOBS()">Restart OBS</button>
                 </div>
             </div>
-            
-            <div id="ws-auth-section" class="input-group">
-                <input type="text" id="ws-url" value="ws://localhost:4455" placeholder="WebSocket URL">
-                <input type="password" id="ws-password" placeholder="OBS WebSocket Password">
-                <button onclick="connectOBS(true)">Save & Connect</button>
-            </div>
         </div>
 
-        <div class="panel" id="preview-panel" style="display:none;">
+        <div class="panel" id="preview-panel">
             <h2>Live Preview <span id="current-scene-name" style="font-weight:normal; color:var(--accent); font-size:1rem; margin-left: 10px;"></span></h2>
             <div class="preview-container">
                 <div id="preview-placeholder">Waiting for preview...</div>
@@ -219,19 +215,23 @@
         
         <div class="panel" id="srtla-stats-panel">
             <h2>SRTLA Live Stats</h2>
-            <div id="srtla-stats-container" style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+            <div id="srtla-stats-container" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:15px;">
                 <div style="color:var(--text-muted); font-style:italic;">No active connections.</div>
             </div>
         </div>
 
-        <div class="panel" id="scenes-panel" style="display:none;">
+        <div class="panel" id="scenes-panel">
             <h2>Scenes</h2>
-            <div class="scenes-grid" id="scenes-container"></div>
+            <div class="scenes-grid" id="scenes-container">
+                <div style="color:var(--text-muted); font-size:0.9rem;">Loading scenes...</div>
+            </div>
         </div>
 
-        <div class="panel" id="sources-panel" style="display:none;">
+        <div class="panel" id="sources-panel">
             <h2>Sources <span style="font-size:0.9rem; font-weight:normal; color:var(--text-muted);">(Current Scene)</span></h2>
-            <div class="scenes-grid" id="sources-container"></div>
+            <div class="scenes-grid" id="sources-container">
+                <div style="color:var(--text-muted); font-size:0.9rem;">Select a scene to view sources</div>
+            </div>
         </div>
     </div>
 
@@ -287,19 +287,33 @@
                     <span class="slider"></span>
                 </label>
             </div>
-            <div class="setting-row" style="flex-direction:column; align-items:flex-start; border-bottom:none;">
-                <label style="margin-bottom:5px;">OBS WebSocket URL Override (For remote access)</label>
-                <div class="input-group" style="width:100%;">
-                    <input type="text" id="setting-ws-url-override" placeholder="wss://your-domain.com">
-                </div>
-                <div style="font-size:0.85rem; color:var(--text-muted); margin-top:5px;">If left blank, the frontend will connect using the local OBS WebSocket port.</div>
-            </div>
             <div class="setting-row">
                 <span>Web Interface Session</span>
                 <button class="btn-danger" onclick="logout()" style="padding:5px 10px;">Logout</button>
             </div>
             <div style="margin-top:20px; text-align:right;">
                 <button onclick="saveBasicSettings()">Save Settings</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>OBS Backend Connection Settings</h2>
+            <div style="margin-bottom:15px; font-size:0.9rem; color:var(--text-muted);">
+                Configure the local connection between the PHP backend relay and OBS WebSocket.
+            </div>
+            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:10px; border-bottom:none;">
+                <label style="margin-bottom:5px;">OBS WebSocket Host & Port</label>
+                <div style="display:flex; gap:10px; width:100%;">
+                    <input type="text" id="backend-obs-host" value="127.0.0.1" style="flex-grow:2;">
+                    <input type="number" id="backend-obs-port" value="4455" style="flex-grow:1;">
+                </div>
+            </div>
+            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:10px; border-bottom:none;">
+                <label style="margin-bottom:5px;">OBS WebSocket Password</label>
+                <input type="password" id="backend-obs-pwd" placeholder="Enter OBS WebSocket Password if set" style="width:100%; box-sizing:border-box;">
+            </div>
+            <div style="margin-top:10px; text-align:right;">
+                <button onclick="saveBackendConfig()">Save Backend Config</button>
             </div>
         </div>
 
@@ -387,7 +401,7 @@
             </div>
             <div id="obs-source-settings-container" style="margin-top:15px; display:none;">
                 <h3 id="obs-source-settings-title" style="margin-bottom:10px;"></h3>
-                <textarea id="obs-source-settings-json" style="width:100%; box-sizing:border-box; height:300px; font-family:monospace; background:rgba(0,0,0,0.5); color:var(--text); border:1px solid #444; border-radius:4px; padding:10px;"></textarea>
+                <textarea id="obs-source-settings-json" style="width:100%; box-sizing:border-box; height:300px; font-family:monospace; background:rgba(0,0,0,0.5); color:var(--text-main); border:1px solid #444; border-radius:4px; padding:10px;"></textarea>
                 <div style="margin-top:10px; text-align:right;">
                     <button onclick="saveOBSSourceSettings()">Apply Source Settings</button>
                 </div>
@@ -429,8 +443,6 @@
                 </div>
             </div>
         </div>
-
-        </div>
     </div>
 
     <!-- MULTISTREAM TAB -->
@@ -464,8 +476,6 @@
                 <tr><th>Name</th><th>Port</th><th>Status</th><th>Actions</th></tr>
             </table>
         </div>
-        </div>
-    </div>
     </div>
 
     <!-- TARGET MODAL -->
@@ -497,346 +507,201 @@
     </div>
 
     <script>
-        // SHA-256 for OBS Auth
-        async function sha256(message) {
-            const msgBuffer = new TextEncoder().encode(message);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return btoa(String.fromCharCode.apply(null, hashArray));
-        }
-
-        let ws = null;
-        let wsConnectionAttempts = 0;
-        let manualDisconnect = false;
-        let previewInterval = null;
-        let statsInterval = null;
         let currentScene = "";
         let cachedScenes = [];
+        let cachedSources = [];
+        let cachedNoFailoverScenes = [];
+        let isConnected = false;
+        let isRestarting = false;
+        let overviewInterval = null;
+        let previewInterval = null;
+        let monitorInterval = null;
+
+        // Relay and API Dispatcher
+        async function apiCall(url, method = 'GET', body = null) {
+            try {
+                const opts = { method, headers: { 'Content-Type': 'application/json' } };
+                if (body && method !== 'GET') opts.body = JSON.stringify(body);
+                const res = await fetch(url, opts);
+                if (res.status === 401) {
+                    document.getElementById('login-overlay').style.display = 'flex';
+                    return null;
+                }
+                return await res.json();
+            } catch(e) {
+                return null;
+            }
+        }
+
+        async function relayRequest(action, data = {}, method = 'POST') {
+            // 1. Try PHP Relay endpoint first
+            let res = await apiCall(`obs_relay.php?action=${encodeURIComponent(action)}`, method, method === 'POST' ? data : null);
+            if (res && res.status !== undefined) return res;
+
+            // 2. Fallback to native plugin HTTP server /api/ endpoints
+            if (action === 'get_overview') return await apiCall('/api/obs/overview');
+            if (action === 'set_current_scene') return await apiCall('/api/obs/set_scene', 'POST', data);
+            if (action === 'set_scene_item_enabled') return await apiCall('/api/obs/set_source_visibility', 'POST', data);
+            if (action === 'toggle_stream') return await apiCall('/api/obs/toggle_stream', 'POST', data);
+            if (action === 'toggle_feature') return await apiCall('/api/obs/feature', 'POST', data);
+            if (action === 'set_transition') return await apiCall('/api/obs/transition', 'POST', data);
+            if (action === 'plugin_settings') return await apiCall('/api/settings', method, data);
+            if (action === 'plugin_receivers') return await apiCall('/api/receivers');
+            if (action === 'plugin_stats') return await apiCall('/api/stats');
+            if (action === 'plugin_receiver_action') return await apiCall('/api/receivers/action', 'POST', data);
+            if (action === 'plugin_multistream_targets') return await apiCall('/api/multistream/targets');
+            if (action === 'plugin_multistream_action') return await apiCall('/api/multistream/action', 'POST', data);
+            if (action === 'plugin_multistream_manage') return await apiCall('/api/multistream/manage', 'POST', data);
+            if (action === 'plugin_autoswitch') return await apiCall('/api/autoswitch', method, data);
+            if (action === 'plugin_stream_key') return await apiCall('/api/stream_key', method, data);
+            if (action === 'plugin_restart') return await apiCall('/api/restart', 'POST', data);
+
+            return null;
+        }
 
         function switchTab(tabId) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
-            document.getElementById(`tab-${tabId}`).classList.add('active');
+            const tabBtn = document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`);
+            if (tabBtn) tabBtn.classList.add('active');
+            const content = document.getElementById(`tab-${tabId}`);
+            if (content) content.classList.add('active');
         }
 
         async function init() {
-            // 1. Load settings (including aggressive backend password storage)
-            let data = {};
+            // Load Plugin Settings
             try {
-                const res = await fetch('/api/settings');
-                data = await res.json();
-                document.getElementById('setting-proxy').checked = data.proxy_enabled;
-                document.getElementById('setting-autoswitch').checked = data.autoswitch_enabled;
-                document.getElementById('setting-vis-autoswitch').checked = data.vis_autoswitch_enabled;
-                document.getElementById('setting-multistream-sync').checked = data.sync_with_obs_live;
-                document.getElementById('ws-password').value = data.ws_password || savedPwd || "";
-                if (data.ws_url_override) document.getElementById('setting-ws-url-override').value = data.ws_url_override;
-            } catch(e) { console.error(e); }
-
-            // 2. Get OBS WS Config & auto connect
-            try {
-                const res = await fetch('/api/obs_ws_config');
-                const conf = await res.json();
-                
-                let savedUrl = localStorage.getItem('wsUrl');
-                let savedPwd = localStorage.getItem('wsPassword');
-                let overrideUrl = data.ws_url_override;
-                
-                document.getElementById('ws-url').value = overrideUrl || savedUrl || (conf.ws_port ? `ws://localhost:${conf.ws_port}` : 'ws://localhost:4455');
-                document.getElementById('ws-password').value = data.ws_password || savedPwd || "";
-
-                if (document.getElementById('ws-password').value) {
-                    connectOBS();
-                } else {
-                    if (conf.ws_enabled === false) {
-                        document.getElementById('ws-status-text').innerText = "OBS WebSocket might be disabled. Password required.";
-                    } else {
-                        document.getElementById('ws-status-text').innerText = "OBS WebSocket requires a password.";
-                    }
-                    document.getElementById('ws-auth-section').style.display = 'flex';
-                    
-                    // Watch for browser password manager autofill
-                    let autofillCheck = setInterval(() => {
-                        if (document.getElementById('ws-password').value) {
-                            clearInterval(autofillCheck);
-                            connectOBS();
-                        }
-                    }, 500);
-                    setTimeout(() => clearInterval(autofillCheck), 3000);
+                const data = await relayRequest('plugin_settings', {}, 'GET');
+                if (data) {
+                    if (document.getElementById('setting-proxy')) document.getElementById('setting-proxy').checked = !!data.proxy_enabled;
+                    if (document.getElementById('setting-autoswitch')) document.getElementById('setting-autoswitch').checked = !!data.autoswitch_enabled;
+                    if (document.getElementById('setting-vis-autoswitch')) document.getElementById('setting-vis-autoswitch').checked = !!data.vis_autoswitch_enabled;
+                    if (document.getElementById('setting-multistream-sync')) document.getElementById('setting-multistream-sync').checked = !!data.sync_with_obs_live;
                 }
-            } catch(e) { console.error(e); }
+            } catch(e) {}
 
-            // 3. Load stream key
+            // Load Backend Relay config
             try {
-                const res = await fetch('/api/stream_key');
-                const data = await res.json();
-                document.getElementById('stream-key').value = data.key;
-                document.getElementById('stream-server').value = data.server || '';
-            } catch(e) { console.error(e); }
+                const cfgRes = await apiCall('obs_relay.php?action=get_config');
+                if (cfgRes && cfgRes.config) {
+                    document.getElementById('backend-obs-host').value = cfgRes.config.obs_host || '127.0.0.1';
+                    document.getElementById('backend-obs-port').value = cfgRes.config.obs_port || 4455;
+                }
+            } catch(e) {}
 
-            // 4. Load auto switch rules
+            // Load Stream Key
+            try {
+                const data = await relayRequest('plugin_stream_key', {}, 'GET');
+                if (data) {
+                    document.getElementById('stream-key').value = data.key || '';
+                    document.getElementById('stream-server').value = data.server || '';
+                }
+            } catch(e) {}
+
+            // Load auto switch rules
             loadAutoSwitchRules();
 
-            // 5. Start polling receivers
-            statsInterval = setInterval(pollReceivers, 2000);
-            pollReceivers();
+            // Load OBS Settings dropdowns
+            loadOBSStaticSettings();
 
-            // 6. Start polling multistream
-            setInterval(pollMultistream, 2000);
+            // Start Polling Loops
+            if (overviewInterval) clearInterval(overviewInterval);
+            overviewInterval = setInterval(pollOverview, 1500);
+            pollOverview();
+
+            if (previewInterval) clearInterval(previewInterval);
+            previewInterval = setInterval(pollPreview, 1500);
+
+            if (monitorInterval) clearInterval(monitorInterval);
+            monitorInterval = setInterval(() => {
+                pollReceivers();
+                pollMultistream();
+            }, 2000);
+            pollReceivers();
             pollMultistream();
         }
 
-        let isRestarting = false;
+        async function pollOverview() {
+            const data = await relayRequest('get_overview', {}, 'GET');
+            const statusInd = document.getElementById('obs-status-indicator');
+            const statusTxt = document.getElementById('obs-status-text');
 
-        async function connectOBS(manual = false) {
-            if (manual) wsConnectionAttempts = 0;
+            if (!data || data.connected === false || data.status === 'error') {
+                isConnected = false;
+                statusInd.className = "status disconnected";
+                statusTxt.innerText = isRestarting ? "RESTARTING OBS..." : "OBS Disconnected / Unreachable";
+                document.getElementById('obs-stream-status').style.display = 'none';
+                return;
+            }
 
-            const url = document.getElementById('ws-url').value;
-            const password = document.getElementById('ws-password').value;
-            
-            if (url) localStorage.setItem('wsUrl', url);
-            if (password) localStorage.setItem('wsPassword', password);
+            isConnected = true;
+            statusInd.className = "status connected";
+            statusTxt.innerText = "Connected to OBS";
 
-            if (ws) ws.close();
-            
-            ws = new WebSocket(url);
-            ws.onopen = () => {
-                console.log("WS Connected");
-                wsConnectionAttempts = 0;
-            };
-            ws.onmessage = async (event) => {
-                const msg = JSON.parse(event.data);
-                if (msg.op === 0) {
-                    let authPayload = undefined;
-                    if (msg.d.authentication) {
-                        const { challenge, salt } = msg.d.authentication;
-                        authPayload = await sha256(await sha256(password + salt) + challenge);
-                    }
-                    // Subscriptions: 1023 (All)
-                    ws.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, authentication: authPayload, eventSubscriptions: 1023 } }));
-                } 
-                else if (msg.op === 2) {
-                    document.getElementById('ws-status-indicator').className = "status connected";
-                    document.getElementById('ws-status-text').innerText = "Connected";
-                    document.getElementById('ws-disconnect-btn').style.display = 'block';
-                    document.getElementById('preview-panel').style.display = 'block';
-                    document.getElementById('scenes-panel').style.display = 'block';
-                    sendRequest("GetSceneList");
-                    sendRequest("GetStreamStatus");
-                    sendRequest("GetInputList");
-                    sendRequest("GetVideoSettings");
-                    sendRequest("GetRecordDirectory");
-                    sendRequest("GetProfileList");
-                    sendRequest("GetSceneCollectionList");
-                    sendRequest("GetVirtualCamStatus");
-                    sendRequest("GetStudioModeEnabled");
-                    sendRequest("GetReplayBufferStatus");
-                    sendRequest("GetSceneTransitionList");
-                    if(previewInterval) clearInterval(previewInterval);
-                    previewInterval = setInterval(() => {
-                        if(currentScene) sendRequest("GetSourceScreenshot", { sourceName: currentScene, imageFormat: "jpeg", imageWidth: 640, imageHeight: 360, imageCompressionQuality: 50 });
-                        sendRequest("GetStreamStatus");
-                    }, 1500);
-                }
-                else if (msg.op === 5) {
-                    if (msg.d.eventType === "CurrentProgramSceneChanged") {
-                        currentScene = msg.d.eventData.sceneName;
-                        document.getElementById('current-scene-name').innerText = "- " + currentScene;
-                        renderScenes(cachedScenes);
-                        sendRequest("GetSceneItemList", { sceneName: currentScene });
-                    } else if (msg.d.eventType === "SceneItemEnableStateChanged") {
-                        if (msg.d.eventData.sceneName === currentScene) {
-                            sendRequest("GetSceneItemList", { sceneName: currentScene });
-                        }
-                    } else if (msg.d.eventType === "StreamStateChanged") {
-                        updateStreamStatusUI(msg.d.eventData.outputActive, msg.d.eventData.outputState);
-                    } else if (msg.d.eventType === "VirtualcamStateChanged") {
-                        document.getElementById('obs-toggle-vcam').checked = msg.d.eventData.outputActive;
-                    } else if (msg.d.eventType === "ReplayBufferStateChanged") {
-                        document.getElementById('obs-toggle-replay').checked = msg.d.eventData.outputActive;
-                    } else if (msg.d.eventType === "StudioModeStateChanged") {
-                        document.getElementById('obs-toggle-studio').checked = msg.d.eventData.studioModeEnabled;
-                    } else if (msg.d.eventType === "CurrentSceneTransitionChanged") {
-                        document.getElementById('obs-transition-sel').value = msg.d.eventData.transitionName;
-                    }
-                }
-                else if (msg.op === 7) {
-                    if (msg.d.requestType === "GetSceneList") {
-                        currentScene = msg.d.responseData.currentProgramSceneName;
-                        document.getElementById('current-scene-name').innerText = "- " + currentScene;
-                        cachedScenes = msg.d.responseData.scenes;
-                        renderScenes(cachedScenes);
-                        updateDropdowns();
-                        sendRequest("GetSceneItemList", { sceneName: currentScene });
-                    }
-                    else if (msg.d.requestType === "GetSceneItemList") {
-                        document.getElementById('sources-panel').style.display = 'block';
-                        renderSources(msg.d.responseData.sceneItems);
-                    }
-                    else if (msg.d.requestType === "GetSourceScreenshot") {
-                        document.getElementById('preview-image').src = msg.d.responseData.imageData;
-                        document.getElementById('preview-image').style.display = "block";
-                        document.getElementById('preview-placeholder').style.display = "none";
-                    }
-                    else if (msg.d.requestType === "GetStreamStatus") {
-                        const data = msg.d.responseData;
-                        updateStreamStatusUI(data.outputActive, data.outputState);
-                        
-                        const mainDashPanel = document.getElementById('mainstream-dashboard-panel');
-                        const mainDashMetrics = document.getElementById('mainstream-metrics');
-                        if (data.outputActive) {
-                            mainDashPanel.style.display = 'block';
-                            mainDashMetrics.innerHTML = `
-                                <strong>Duration:</strong> ${data.outputTimecode}<br>
-                                <strong>Data Sent:</strong> ${(data.outputBytes / 1024 / 1024).toFixed(2)} MB<br>
-                                <strong>Dropped Frames:</strong> ${data.outputSkippedFrames} / ${data.outputTotalFrames}
-                            `;
-                        } else {
-                            mainDashPanel.style.display = 'none';
-                        }
-                    }
-                    else if (msg.d.requestType === "GetInputList") {
-                        cachedSources = msg.d.responseData.inputs.map(i => i.inputName);
-                        updateDropdowns();
-                    }
-                    else if (msg.d.requestType === "GetVideoSettings") {
-                        document.getElementById('obs-base-res').value = msg.d.responseData.baseWidth + 'x' + msg.d.responseData.baseHeight;
-                        document.getElementById('obs-output-res').value = msg.d.responseData.outputWidth + 'x' + msg.d.responseData.outputHeight;
-                        document.getElementById('obs-fps-num').value = msg.d.responseData.fpsNumerator;
-                        document.getElementById('obs-fps-den').value = msg.d.responseData.fpsDenominator;
-                    }
-                    else if (msg.d.requestType === "GetRecordDirectory") {
-                        document.getElementById('obs-record-dir').value = msg.d.responseData.recordDirectory;
-                    }
-                    else if (msg.d.requestType === "GetProfileList") {
-                        const sel = document.getElementById('obs-profile-sel');
-                        sel.innerHTML = "";
-                        msg.d.responseData.profiles.forEach(p => {
-                            sel.innerHTML += `<option value="${p}" ${p === msg.d.responseData.currentProfileName ? "selected" : ""}>${p}</option>`;
-                        });
-                    }
-                    else if (msg.d.requestType === "GetSceneCollectionList") {
-                        const sel = document.getElementById('obs-scene-collection-sel');
-                        sel.innerHTML = "";
-                        msg.d.responseData.sceneCollections.forEach(c => {
-                            sel.innerHTML += `<option value="${c}" ${c === msg.d.responseData.currentSceneCollectionName ? "selected" : ""}>${c}</option>`;
-                        });
-                    }
-                    else if (msg.d.requestType === "GetInputSettings") {
-                        document.getElementById('obs-source-settings-container').style.display = 'block';
-                        document.getElementById('obs-source-settings-title').innerText = msg.d.requestData.inputName + " Settings (" + msg.d.responseData.inputKind + ")";
-                        document.getElementById('obs-source-settings-json').value = JSON.stringify(msg.d.responseData.inputSettings, null, 2);
-                    }
-                    else if (msg.d.requestType === "GetVirtualCamStatus") {
-                        document.getElementById('obs-toggle-vcam').checked = msg.d.responseData.outputActive;
-                    }
-                    else if (msg.d.requestType === "GetStudioModeEnabled") {
-                        document.getElementById('obs-toggle-studio').checked = msg.d.responseData.studioModeEnabled;
-                    }
-                    else if (msg.d.requestType === "GetReplayBufferStatus") {
-                        document.getElementById('obs-toggle-replay').checked = msg.d.responseData.outputActive;
-                    }
-                    else if (msg.d.requestType === "GetSceneTransitionList") {
-                        const sel = document.getElementById('obs-transition-sel');
-                        sel.innerHTML = "";
-                        msg.d.responseData.transitions.forEach(t => {
-                            sel.innerHTML += `<option value="${t.transitionName}" ${t.transitionName === msg.d.responseData.currentSceneTransitionName ? "selected" : ""}>${t.transitionName}</option>`;
-                        });
-                    }
-                    else if (msg.d.requestType === "GetSceneItemList") {
-                        const sel = document.getElementById('obs-transform-item-sel');
-                        sel.innerHTML = '<option value="">-- Select Item --</option>';
-                        msg.d.responseData.sceneItems.forEach(i => {
-                            sel.innerHTML += `<option value="${i.sceneItemId}">${i.sourceName}</option>`;
-                        });
-                        document.getElementById('obs-transform-settings-container').style.display = 'none';
-                    }
-                    else if (msg.d.requestType === "GetSceneItemTransform") {
-                        document.getElementById('obs-transform-settings-container').style.display = 'block';
-                        document.getElementById('obs-transform-settings-json').value = JSON.stringify(msg.d.responseData.sceneItemTransform, null, 2);
-                    }
-                    else if (msg.d.requestType === "GetSourceFilterList") {
-                        const sel = document.getElementById('obs-filter-sel');
-                        sel.innerHTML = '<option value="">-- Select Filter --</option>';
-                        msg.d.responseData.filters.forEach(f => {
-                            sel.innerHTML += `<option value="${f.filterName}">${f.filterName}</option>`;
-                        });
-                        document.getElementById('obs-filter-settings-container').style.display = 'none';
-                    }
-                    else if (msg.d.requestType === "GetSourceFilter") {
-                        document.getElementById('obs-filter-settings-container').style.display = 'block';
-                        document.getElementById('obs-filter-settings-json').value = JSON.stringify(msg.d.responseData.filterSettings, null, 2);
-                    }
-                }
-            };
-            ws.onclose = (e) => {
-                if (e.code === 4005) {
-                    document.getElementById('ws-status-indicator').className = "status disconnected";
-                    document.getElementById('ws-status-text').innerText = "Authentication Failed. Please check password.";
-                    document.getElementById('ws-auth-section').style.display = 'flex';
-                    wsConnectionAttempts = 0;
-                    return;
-                }
-                
-                if (manualDisconnect) {
-                    document.getElementById('ws-status-indicator').className = "status disconnected";
-                    document.getElementById('ws-status-text').innerText = "Disconnected manually. Enter URL to reconnect.";
-                    document.getElementById('ws-auth-section').style.display = 'flex';
-                    document.getElementById('ws-disconnect-btn').style.display = 'none';
-                    manualDisconnect = false;
-                    return;
-                }
-                
-                if(previewInterval) clearInterval(previewInterval);
-                
-                if (!isRestarting) {
-                    wsConnectionAttempts++;
-                    document.getElementById('ws-status-indicator').className = "status disconnected";
-                    document.getElementById('ws-auth-section').style.display = 'flex';
-                    document.getElementById('ws-disconnect-btn').style.display = 'none';
-                    
-                    if (wsConnectionAttempts > 2) {
-                        document.getElementById('ws-status-text').innerText = "Connection Refused. Please verify URL and Password.";
-                        // Keep trying in background silently, but at a slower rate
-                        setTimeout(() => {
-                            if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
-                        }, 5000);
-                    } else {
-                        document.getElementById('ws-status-text').innerText = `Disconnected (Retrying... ${wsConnectionAttempts}/3)`;
-                        setTimeout(() => {
-                            if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
-                        }, 3000);
-                    }
-                } else {
-                    document.getElementById('ws-status-indicator').className = "status disconnected";
-                    document.getElementById('ws-status-text').innerText = "RESTARTING OBS...";
-                    setTimeout(() => {
-                        if(!ws || ws.readyState === WebSocket.CLOSED) connectOBS();
-                    }, 3000);
-                }
-            };
-            
-            ws.onerror = (e) => {
-                console.error("WebSocket error:", e);
-            };
-        }
+            // Update Stream Status
+            const stream = data.stream_status || {};
+            updateStreamStatusUI(stream.outputActive || false, stream.outputState || (stream.outputActive ? "OBS_WEBSOCKET_OUTPUT_STARTED" : "OBS_WEBSOCKET_OUTPUT_STOPPED"));
 
-        function disconnectOBS() {
-            if (ws) {
-                manualDisconnect = true;
-                ws.close();
+            const mainDashPanel = document.getElementById('mainstream-dashboard-panel');
+            const mainDashMetrics = document.getElementById('mainstream-metrics');
+            if (stream.outputActive) {
+                mainDashPanel.style.display = 'block';
+                mainDashMetrics.innerHTML = `
+                    <strong>Duration:</strong> ${stream.outputTimecode || '00:00:00'}<br>
+                    <strong>Data Sent:</strong> ${stream.outputBytes ? (stream.outputBytes / 1024 / 1024).toFixed(2) : '0.00'} MB<br>
+                    <strong>Dropped Frames:</strong> ${stream.outputSkippedFrames || 0} / ${stream.outputTotalFrames || 0}
+                `;
+            } else {
+                mainDashPanel.style.display = 'none';
+            }
+
+            // Update Toggles
+            if (document.getElementById('obs-toggle-vcam')) document.getElementById('obs-toggle-vcam').checked = !!data.vcam_active;
+            if (document.getElementById('obs-toggle-studio')) document.getElementById('obs-toggle-studio').checked = !!data.studio_mode_enabled;
+            if (document.getElementById('obs-toggle-replay')) document.getElementById('obs-toggle-replay').checked = !!data.replay_buffer_active;
+
+            // Update Scenes
+            if (data.scenes && Array.isArray(data.scenes)) {
+                cachedScenes = data.scenes;
+                if (data.current_program_scene) {
+                    currentScene = data.current_program_scene;
+                    document.getElementById('current-scene-name').innerText = "- " + currentScene;
+                }
+                renderScenes(cachedScenes);
+                updateDropdowns();
+            }
+
+            // Update Sources for current scene
+            if (data.scene_items && Array.isArray(data.scene_items)) {
+                renderSources(data.scene_items);
+            }
+
+            // Transitions
+            if (data.transitions && Array.isArray(data.transitions)) {
+                const sel = document.getElementById('obs-transition-sel');
+                if (sel && sel.options.length === 0) {
+                    sel.innerHTML = "";
+                    data.transitions.forEach(t => {
+                        sel.innerHTML += `<option value="${t.transitionName}" ${t.transitionName === data.current_transition ? "selected" : ""}>${t.transitionName}</option>`;
+                    });
+                }
             }
         }
 
-        function sendRequest(requestType, requestData = {}) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ op: 6, d: { requestType, requestId: Math.random().toString(), requestData } }));
+        async function pollPreview() {
+            if (!isConnected || !currentScene) return;
+            const res = await relayRequest('get_screenshot', { sourceName: currentScene, width: 640, height: 360, quality: 45 }, 'POST');
+            if (res && res.imageData) {
+                const img = document.getElementById('preview-image');
+                img.src = res.imageData;
+                img.style.display = "block";
+                document.getElementById('preview-placeholder').style.display = "none";
             }
         }
 
-        function toggleOBSStream() {
-            sendRequest("ToggleStream");
+        async function toggleOBSStream() {
+            await relayRequest('toggle_stream');
+            setTimeout(pollOverview, 500);
         }
 
         function updateStreamStatusUI(isActive, state = null) {
@@ -854,7 +719,7 @@
             } else {
                 indicator.className = "status disconnected";
                 text.innerText = state === "OBS_WEBSOCKET_OUTPUT_STARTING" ? "STARTING..." : "OFFLINE";
-                text.style.color = "var(--text)";
+                text.style.color = "var(--text-main)";
                 btn.innerText = "Start Stream";
                 btn.className = "btn-outline";
             }
@@ -867,7 +732,13 @@
                 const btn = document.createElement("div");
                 btn.className = "scene-btn" + (scene.sceneName === currentScene ? " active" : "");
                 btn.innerText = scene.sceneName;
-                btn.onclick = () => sendRequest("SetCurrentProgramScene", { sceneName: scene.sceneName });
+                btn.onclick = async () => {
+                    currentScene = scene.sceneName;
+                    renderScenes(cachedScenes);
+                    document.getElementById('current-scene-name').innerText = "- " + currentScene;
+                    await relayRequest('set_current_scene', { sceneName: scene.sceneName });
+                    setTimeout(pollOverview, 300);
+                };
                 cont.appendChild(btn);
             });
         }
@@ -880,15 +751,66 @@
                 btn.className = "scene-btn";
                 if (!item.sceneItemEnabled) btn.style.opacity = "0.4";
                 btn.innerText = item.sourceName;
-                btn.onclick = () => sendRequest("SetSceneItemEnabled", { sceneName: currentScene, sceneItemId: item.sceneItemId, sceneItemEnabled: !item.sceneItemEnabled });
+                btn.onclick = async () => {
+                    const newState = !item.sceneItemEnabled;
+                    item.sceneItemEnabled = newState;
+                    btn.style.opacity = newState ? "1" : "0.4";
+                    await relayRequest('set_scene_item_enabled', {
+                        sceneName: currentScene,
+                        sceneItemId: item.sceneItemId,
+                        sceneItemEnabled: newState
+                    });
+                    setTimeout(pollOverview, 300);
+                };
                 cont.appendChild(btn);
             });
         }
 
-        function saveOBSVideoSettings() {
+        async function loadOBSStaticSettings() {
+            try {
+                const vid = await relayRequest('get_video_settings', {}, 'GET');
+                if (vid && vid.data) {
+                    document.getElementById('obs-base-res').value = vid.data.baseWidth + 'x' + vid.data.baseHeight;
+                    document.getElementById('obs-output-res').value = vid.data.outputWidth + 'x' + vid.data.outputHeight;
+                    document.getElementById('obs-fps-num').value = vid.data.fpsNumerator;
+                    document.getElementById('obs-fps-den').value = vid.data.fpsDenominator;
+                }
+
+                const rec = await relayRequest('get_record_directory', {}, 'GET');
+                if (rec && rec.data) {
+                    document.getElementById('obs-record-dir').value = rec.data.recordDirectory || '';
+                }
+
+                const prof = await relayRequest('get_profiles', {}, 'GET');
+                if (prof && prof.data && prof.data.profiles) {
+                    const sel = document.getElementById('obs-profile-sel');
+                    sel.innerHTML = "";
+                    prof.data.profiles.forEach(p => {
+                        sel.innerHTML += `<option value="${p}" ${p === prof.data.currentProfileName ? "selected" : ""}>${p}</option>`;
+                    });
+                }
+
+                const sc = await relayRequest('get_scene_collections', {}, 'GET');
+                if (sc && sc.data && sc.data.sceneCollections) {
+                    const sel = document.getElementById('obs-scene-collection-sel');
+                    sel.innerHTML = "";
+                    sc.data.sceneCollections.forEach(c => {
+                        sel.innerHTML += `<option value="${c}" ${c === sc.data.currentSceneCollectionName ? "selected" : ""}>${c}</option>`;
+                    });
+                }
+
+                const inp = await relayRequest('get_inputs', {}, 'GET');
+                if (inp && inp.data && inp.data.inputs) {
+                    cachedSources = inp.data.inputs.map(i => i.inputName);
+                    updateDropdowns();
+                }
+            } catch(e) {}
+        }
+
+        async function saveOBSVideoSettings() {
             const base = document.getElementById('obs-base-res').value.split('x');
             const out = document.getElementById('obs-output-res').value.split('x');
-            sendRequest("SetVideoSettings", {
+            await relayRequest('set_video_settings', {
                 baseWidth: parseInt(base[0]), baseHeight: parseInt(base[1]),
                 outputWidth: parseInt(out[0]), outputHeight: parseInt(out[1]),
                 fpsNumerator: parseInt(document.getElementById('obs-fps-num').value),
@@ -897,109 +819,63 @@
             alert("Video Settings Applied!");
         }
 
-        function saveOBSRecordSettings() {
-            sendRequest("SetRecordDirectory", { recordDirectory: document.getElementById('obs-record-dir').value });
+        async function saveOBSRecordSettings() {
+            await relayRequest('set_record_directory', { recordDirectory: document.getElementById('obs-record-dir').value });
             alert("Record Directory Applied!");
         }
 
-        function setOBSProfile() {
-            sendRequest("SetCurrentProfile", { profileName: document.getElementById('obs-profile-sel').value });
+        async function setOBSProfile() {
+            await relayRequest('set_profile', { profileName: document.getElementById('obs-profile-sel').value });
+            alert("Profile Switched!");
         }
 
-        function setOBSSceneCollection() {
-            sendRequest("SetCurrentSceneCollection", { sceneCollectionName: document.getElementById('obs-scene-collection-sel').value });
+        async function setOBSSceneCollection() {
+            await relayRequest('set_scene_collection', { sceneCollectionName: document.getElementById('obs-scene-collection-sel').value });
+            alert("Scene Collection Switched!");
         }
 
-        function fetchSourceSettings(sourceName) {
+        async function fetchSourceSettings(sourceName) {
             if (!sourceName) return;
-            // The requestData must be injected cleanly via our sendRequest function
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ op: 6, d: { requestType: "GetInputSettings", requestId: Math.random().toString(), requestData: { inputName: sourceName } } }));
+            const res = await relayRequest('get_input_settings', { inputName: sourceName }, 'POST');
+            if (res && res.data) {
+                document.getElementById('obs-source-settings-container').style.display = 'block';
+                document.getElementById('obs-source-settings-title').innerText = sourceName + " Settings (" + (res.data.inputKind || 'Source') + ")";
+                document.getElementById('obs-source-settings-json').value = JSON.stringify(res.data.inputSettings, null, 2);
             }
         }
 
-        function saveOBSSourceSettings() {
+        async function saveOBSSourceSettings() {
             const sourceName = document.getElementById('obs-source-settings-title').innerText.split(" Settings")[0];
             try {
                 const settings = JSON.parse(document.getElementById('obs-source-settings-json').value);
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ op: 6, d: { requestType: "SetInputSettings", requestId: Math.random().toString(), requestData: { inputName: sourceName, inputSettings: settings } } }));
-                }
+                await relayRequest('set_input_settings', { inputName: sourceName, inputSettings: settings });
                 alert("Source Settings Applied!");
             } catch(e) {
                 alert("Invalid JSON format!");
             }
         }
 
-        function toggleOBSFeature(feature, state) {
-            if (feature === 'vcam') sendRequest(state ? "StartVirtualCam" : "StopVirtualCam");
-            if (feature === 'replay') sendRequest(state ? "StartReplayBuffer" : "StopReplayBuffer");
-            if (feature === 'studio') sendRequest("SetStudioModeEnabled", { studioModeEnabled: state });
+        async function toggleOBSFeature(feature, state) {
+            await relayRequest('toggle_feature', { feature, state });
         }
 
-        function setOBSTransition() {
-            sendRequest("SetCurrentSceneTransition", { transitionName: document.getElementById('obs-transition-sel').value });
-        }
-
-        function fetchSceneItems(sceneName) {
-            if (!sceneName) return;
-            sendRequest("GetSceneItemList", { sceneName: sceneName });
-        }
-
-        function fetchSceneItemTransform(itemId) {
-            if (!itemId) return;
-            const sceneName = document.getElementById('obs-transform-scene-sel').value;
-            sendRequest("GetSceneItemTransform", { sceneName: sceneName, sceneItemId: parseInt(itemId) });
-        }
-
-        function saveOBSTransformSettings() {
-            const sceneName = document.getElementById('obs-transform-scene-sel').value;
-            const itemId = document.getElementById('obs-transform-item-sel').value;
-            try {
-                const transform = JSON.parse(document.getElementById('obs-transform-settings-json').value);
-                sendRequest("SetSceneItemTransform", { sceneName: sceneName, sceneItemId: parseInt(itemId), sceneItemTransform: transform });
-                alert("Transform Applied!");
-            } catch(e) { alert("Invalid JSON!"); }
-        }
-
-        function fetchSourceFilters(sourceName) {
-            if (!sourceName) return;
-            sendRequest("GetSourceFilterList", { sourceName: sourceName });
-        }
-
-        function fetchFilterSettings(filterName) {
-            if (!filterName) return;
-            const sourceName = document.getElementById('obs-filter-source-sel').value;
-            sendRequest("GetSourceFilter", { sourceName: sourceName, filterName: filterName });
-        }
-
-        function saveOBSFilterSettings() {
-            const sourceName = document.getElementById('obs-filter-source-sel').value;
-            const filterName = document.getElementById('obs-filter-sel').value;
-            try {
-                const settings = JSON.parse(document.getElementById('obs-filter-settings-json').value);
-                sendRequest("SetSourceFilterSettings", { sourceName: sourceName, filterName: filterName, filterSettings: settings });
-                alert("Filter Settings Applied!");
-            } catch(e) { alert("Invalid JSON!"); }
+        async function setOBSTransition() {
+            await relayRequest('set_transition', { transitionName: document.getElementById('obs-transition-sel').value });
+            alert("Transition Set!");
         }
 
         async function restartOBS() {
             if(confirm("Are you sure you want to restart OBS?")) {
                 isRestarting = true;
-                document.getElementById('ws-status-text').innerText = "RESTARTING OBS...";
-                document.getElementById('ws-status-text').style.color = "var(--warning)";
-                document.getElementById('ws-status-indicator').className = "status disconnected";
-                
-                try { await fetch('/api/restart', {method: 'POST'}); } catch(e) {}
-                
+                document.getElementById('obs-status-text').innerText = "RESTARTING OBS...";
+                document.getElementById('obs-status-indicator').className = "status disconnected";
+                await relayRequest('plugin_restart', {}, 'POST');
                 const checkInterval = setInterval(async () => {
-                    try {
-                        const r = await fetch('/api/settings');
-                        if (r.ok) {
-                            clearInterval(checkInterval);
-                            window.location.reload();
-                        }
-                    } catch(e) {}
+                    const r = await relayRequest('plugin_settings', {}, 'GET');
+                    if (r) {
+                        clearInterval(checkInterval);
+                        window.location.reload();
+                    }
                 }, 2000);
             }
         }
@@ -1007,10 +883,7 @@
         async function updateStreamKey() {
             const key = document.getElementById('stream-key').value;
             const server = document.getElementById('stream-server').value;
-            await fetch('/api/stream_key', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key, server})
-            });
+            await relayRequest('plugin_stream_key', { key, server }, 'POST');
             alert("Stream settings updated!");
         }
 
@@ -1027,20 +900,27 @@
         }
 
         async function saveBasicSettings() {
-            await fetch('/api/settings', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    proxy_enabled: document.getElementById('setting-proxy').checked,
-                    autoswitch_enabled: document.getElementById('setting-autoswitch').checked,
-                    vis_autoswitch_enabled: document.getElementById('setting-vis-autoswitch').checked,
-                    sync_with_obs_live: document.getElementById('setting-multistream-sync').checked,
-                    ws_url_override: document.getElementById('setting-ws-url-override').value
-                })
-            });
+            await relayRequest('plugin_settings', {
+                proxy_enabled: document.getElementById('setting-proxy').checked,
+                autoswitch_enabled: document.getElementById('setting-autoswitch').checked,
+                vis_autoswitch_enabled: document.getElementById('setting-vis-autoswitch').checked,
+                sync_with_obs_live: document.getElementById('setting-multistream-sync').checked
+            }, 'POST');
+            alert("Settings saved!");
         }
 
-        let cachedSources = [];
-        let cachedNoFailoverScenes = [];
+        async function saveBackendConfig() {
+            const host = document.getElementById('backend-obs-host').value;
+            const port = document.getElementById('backend-obs-port').value;
+            const pwd = document.getElementById('backend-obs-pwd').value;
+            await apiCall('obs_relay.php?action=set_config', 'POST', {
+                obs_host: host,
+                obs_port: port,
+                obs_password: pwd
+            });
+            alert("Backend OBS configuration saved!");
+            pollOverview();
+        }
 
         function renderNoFailoverScenes() {
             const container = document.getElementById('no-failover-scenes-list');
@@ -1093,8 +973,8 @@
         }
 
         async function loadAutoSwitchRules() {
-            const res = await fetch('/api/autoswitch');
-            const data = await res.json();
+            const data = await relayRequest('plugin_autoswitch', {}, 'GET');
+            if (!data) return;
             
             const rules = JSON.parse(data.rules || "[]");
             const table = document.getElementById('rules-table');
@@ -1139,7 +1019,7 @@
         async function saveAutoSwitchRules() {
             const rules = [];
             document.querySelectorAll('#rules-table tr').forEach((row, i) => {
-                if(i === 0) return; // skip header
+                if(i === 0) return;
                 rules.push({
                     minKbps: parseInt(row.querySelector('.rmin').value),
                     maxKbps: parseInt(row.querySelector('.rmax').value),
@@ -1155,7 +1035,7 @@
             
             const visRules = [];
             document.querySelectorAll('#vis-rules-table tr').forEach((row, i) => {
-                if(i === 0) return; // skip header
+                if(i === 0) return;
                 visRules.push({
                     minKbps: parseInt(row.querySelector('.rmin').value),
                     maxKbps: parseInt(row.querySelector('.rmax').value),
@@ -1163,44 +1043,38 @@
                 });
             });
             
-            await fetch('/api/autoswitch', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    rules: JSON.stringify(rules),
-                    no_failover_scenes: JSON.stringify(noFailover),
-                    visibility_rules: JSON.stringify(visRules)
-                })
-            });
-            alert("Rules saved and reloaded!");
+            await relayRequest('plugin_autoswitch', {
+                rules: JSON.stringify(rules),
+                no_failover_scenes: JSON.stringify(noFailover),
+                visibility_rules: JSON.stringify(visRules)
+            }, 'POST');
+            alert("Rules saved!");
         }
 
         async function pollReceivers() {
             try {
-                const res = await fetch('/api/receivers');
-                const receivers = await res.json();
-                const table = document.getElementById('receivers-table');
-                while(table.rows.length > 1) table.deleteRow(1);
-                receivers.forEach(r => {
-                    const row = table.insertRow();
-                    const statusColor = r.running ? "var(--success)" : "var(--text-muted)";
-                    row.innerHTML = `
-                        <td>${r.name}</td>
-                        <td>${r.listen_port}</td>
-                        <td style="color:${statusColor}; font-weight:bold;">${r.running ? 'Running' : 'Stopped'}</td>
-                        <td>
-                            <button onclick="receiverAction('${r.name}', 'start')" ${r.running ? 'disabled' : ''}>Start</button>
-                            <button class="btn-danger" onclick="receiverAction('${r.name}', 'stop')" ${!r.running ? 'disabled' : ''}>Stop</button>
-                            <button class="btn-warning" onclick="receiverAction('${r.name}', 'restart')">Restart</button>
-                        </td>
-                    `;
-                });
+                const receivers = await relayRequest('plugin_receivers', {}, 'GET');
+                if (receivers && Array.isArray(receivers)) {
+                    const table = document.getElementById('receivers-table');
+                    while(table.rows.length > 1) table.deleteRow(1);
+                    receivers.forEach(r => {
+                        const row = table.insertRow();
+                        const statusColor = r.running ? "var(--success)" : "var(--text-muted)";
+                        row.innerHTML = `
+                            <td>${r.name}</td>
+                            <td>${r.listen_port}</td>
+                            <td style="color:${statusColor}; font-weight:bold;">${r.running ? 'Running' : 'Stopped'}</td>
+                            <td>
+                                <button onclick="receiverAction('${r.name}', 'start')" ${r.running ? 'disabled' : ''}>Start</button>
+                                <button class="btn-danger" onclick="receiverAction('${r.name}', 'stop')" ${!r.running ? 'disabled' : ''}>Stop</button>
+                                <button class="btn-warning" onclick="receiverAction('${r.name}', 'restart')">Restart</button>
+                            </td>
+                        `;
+                    });
+                }
 
-                const statsRes = await fetch('/api/stats');
-                const stats = await statsRes.json();
-                
+                const stats = await relayRequest('plugin_stats', {}, 'GET');
                 const statsContainer = document.getElementById('srtla-stats-container');
-                const statsPanel = document.getElementById('srtla-stats-panel');
-                
                 if (stats && stats.groups && stats.groups.length > 0) {
                     statsContainer.innerHTML = '';
                     stats.groups.forEach(g => {
@@ -1223,10 +1097,7 @@
         }
 
         async function receiverAction(name, action) {
-            await fetch('/api/receivers/action', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name, action})
-            });
+            await relayRequest('plugin_receiver_action', { name, action }, 'POST');
             pollReceivers();
         }
 
@@ -1234,8 +1105,8 @@
 
         async function pollMultistream() {
             try {
-                const res = await fetch('/api/multistream/targets');
-                const targets = await res.json();
+                const targets = await relayRequest('plugin_multistream_targets', {}, 'GET');
+                if (!targets || !Array.isArray(targets)) return;
                 cachedTargets = targets;
                 const table = document.getElementById('multistream-table');
                 while(table.rows.length > 1) table.deleteRow(1);
@@ -1333,43 +1204,37 @@
                 enabled: true
             };
             
-            await fetch('/api/multistream/manage', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ action: id ? 'edit' : 'add', target })
-            });
-            
+            await relayRequest('plugin_multistream_manage', { action: id ? 'edit' : 'add', target }, 'POST');
             document.getElementById('target-modal').style.display = 'none';
             pollMultistream();
         }
 
         async function deleteTarget(id) {
             if (confirm("Delete this target?")) {
-                await fetch('/api/multistream/manage', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ action: 'delete', target: { id } })
-                });
+                await relayRequest('plugin_multistream_manage', { action: 'delete', target: { id } }, 'POST');
                 pollMultistream();
             }
         }
 
         async function multistreamAction(id, action) {
-            await fetch('/api/multistream/action', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id, action})
-            });
+            await relayRequest('plugin_multistream_action', { id, action }, 'POST');
             pollMultistream();
         }
 
         async function checkAuth() {
             try {
-                const res = await fetch('/api/settings');
-                if (res.status === 401) {
-                    document.getElementById('login-overlay').style.display = 'flex';
-                } else if (res.status === 200) {
+                const res = await apiCall('/api/settings');
+                if (res === null) {
+                    // Check if obs_relay.php is reachable
+                    const relayCheck = await apiCall('obs_relay.php?action=get_config');
+                    if (relayCheck) {
+                        init();
+                        return;
+                    }
+                    setTimeout(checkAuth, 2000);
+                } else {
                     document.getElementById('login-overlay').style.display = 'none';
                     init();
-                } else {
-                    setTimeout(checkAuth, 2000);
                 }
             } catch(e) {
                 setTimeout(checkAuth, 2000);
@@ -1383,7 +1248,8 @@
                 body: JSON.stringify({password: pwd})
             });
             if (res.status === 200) {
-                checkAuth();
+                document.getElementById('login-overlay').style.display = 'none';
+                init();
             } else {
                 alert("Incorrect Password!");
                 document.getElementById('login-password').value = "";

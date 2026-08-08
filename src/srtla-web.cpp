@@ -2,6 +2,7 @@
 #include "httplib.h"
 #include <util/config-file.h>
 #include <obs-frontend-api.h>
+#include <obs.h>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -480,6 +481,231 @@ static void handle_api_multistream_manage(const httplib::Request &req, httplib::
 	res.status = 400;
 }
 
+static void handle_api_obs_overview(const httplib::Request &req, httplib::Response &res)
+{
+	REQUIRE_AUTH(req, res)
+	QJsonObject obj;
+	obj["status"] = "ok";
+	obj["connected"] = true;
+
+	QJsonObject streamStatus;
+	bool isStreaming = obs_frontend_streaming_active();
+	streamStatus["outputActive"] = isStreaming;
+	streamStatus["outputState"] = isStreaming ? "OBS_WEBSOCKET_OUTPUT_STARTED" : "OBS_WEBSOCKET_OUTPUT_STOPPED";
+	obj["stream_status"] = streamStatus;
+
+	obj["vcam_active"] = obs_frontend_virtualcam_active();
+	obj["replay_buffer_active"] = obs_frontend_replay_buffer_active();
+	obj["recording_active"] = obs_frontend_recording_active();
+
+	obs_source_t *currentSceneSrc = obs_frontend_get_current_scene();
+	QString currentSceneName = "";
+	if (currentSceneSrc) {
+		const char *name = obs_source_get_name(currentSceneSrc);
+		if (name)
+			currentSceneName = QString::fromUtf8(name);
+	}
+	obj["current_program_scene"] = currentSceneName;
+
+	struct obs_frontend_source_list sceneList = {};
+	obs_frontend_get_scenes(&sceneList);
+	QJsonArray scenesArr;
+	for (size_t i = 0; i < sceneList.sources.num; i++) {
+		obs_source_t *s = sceneList.sources.array[i];
+		if (s) {
+			const char *n = obs_source_get_name(s);
+			if (n) {
+				QJsonObject sObj;
+				sObj["sceneName"] = QString::fromUtf8(n);
+				scenesArr.append(sObj);
+			}
+		}
+	}
+	obs_frontend_source_list_free(&sceneList);
+	obj["scenes"] = scenesArr;
+
+	QJsonArray itemsArr;
+	if (currentSceneSrc) {
+		obs_scene_t *scene = obs_scene_from_source(currentSceneSrc);
+		if (scene) {
+			obs_scene_enum_items(
+				scene,
+				[](obs_scene_t *, obs_sceneitem_t *item, void *param) -> bool {
+					auto *arr = static_cast<QJsonArray *>(param);
+					obs_source_t *itemSrc = obs_sceneitem_get_source(item);
+					if (itemSrc) {
+						const char *n = obs_source_get_name(itemSrc);
+						QJsonObject iObj;
+						iObj["sceneItemId"] = (qint64)obs_sceneitem_get_id(item);
+						iObj["sourceName"] = n ? QString::fromUtf8(n) : "";
+						iObj["sceneItemEnabled"] = obs_sceneitem_visible(item);
+						arr->append(iObj);
+					}
+					return true;
+				},
+				&itemsArr);
+		}
+		obs_source_release(currentSceneSrc);
+	}
+	obj["scene_items"] = itemsArr;
+
+	struct obs_frontend_source_list transList = {};
+	obs_frontend_get_transitions(&transList);
+	QJsonArray transArr;
+	for (size_t i = 0; i < transList.sources.num; i++) {
+		obs_source_t *t = transList.sources.array[i];
+		if (t) {
+			const char *n = obs_source_get_name(t);
+			if (n) {
+				QJsonObject tObj;
+				tObj["transitionName"] = QString::fromUtf8(n);
+				transArr.append(tObj);
+			}
+		}
+	}
+	obs_frontend_source_list_free(&transList);
+	obj["transitions"] = transArr;
+
+	obs_source_t *curTrans = obs_frontend_get_current_transition();
+	if (curTrans) {
+		const char *n = obs_source_get_name(curTrans);
+		obj["current_transition"] = n ? QString::fromUtf8(n) : "";
+		obs_source_release(curTrans);
+	} else {
+		obj["current_transition"] = "";
+	}
+
+	QJsonDocument doc(obj);
+	res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
+}
+
+static void handle_api_obs_set_scene(const httplib::Request &req, httplib::Response &res)
+{
+	REQUIRE_AUTH(req, res)
+	QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(req.body));
+	if (doc.isObject()) {
+		QString sceneName = doc.object()["sceneName"].toString();
+		if (!sceneName.isEmpty()) {
+			QMetaObject::invokeMethod(
+				qApp,
+				[sceneName]() {
+					obs_source_t *src = obs_get_source_by_name(sceneName.toUtf8().constData());
+					if (src) {
+						obs_frontend_set_current_scene(src);
+						obs_source_release(src);
+					}
+				},
+				Qt::QueuedConnection);
+			res.set_content("{\"status\":\"ok\"}", "application/json");
+			return;
+		}
+	}
+	res.status = 400;
+}
+
+static void handle_api_obs_set_source_visibility(const httplib::Request &req, httplib::Response &res)
+{
+	REQUIRE_AUTH(req, res)
+	QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(req.body));
+	if (doc.isObject()) {
+		QString sceneName = doc.object()["sceneName"].toString();
+		qint64 itemId = doc.object()["sceneItemId"].toInteger();
+		bool enabled = doc.object()["sceneItemEnabled"].toBool();
+
+		QMetaObject::invokeMethod(
+			qApp,
+			[sceneName, itemId, enabled]() {
+				obs_source_t *src = obs_get_source_by_name(sceneName.toUtf8().constData());
+				if (src) {
+					obs_scene_t *scene = obs_scene_from_source(src);
+					if (scene) {
+						std::pair<int64_t, bool> data(itemId, enabled);
+						obs_scene_enum_items(
+							scene,
+							[](obs_scene_t *, obs_sceneitem_t *item, void *param) -> bool {
+								auto *d = static_cast<std::pair<int64_t, bool> *>(param);
+								if (obs_sceneitem_get_id(item) == d->first) {
+									obs_sceneitem_set_visible(item, d->second);
+									return false;
+								}
+								return true;
+							},
+							&data);
+					}
+					obs_source_release(src);
+				}
+			},
+			Qt::QueuedConnection);
+		res.set_content("{\"status\":\"ok\"}", "application/json");
+		return;
+	}
+	res.status = 400;
+}
+
+static void handle_api_obs_toggle_stream(const httplib::Request &req, httplib::Response &res)
+{
+	REQUIRE_AUTH(req, res)
+	QMetaObject::invokeMethod(
+		qApp,
+		[]() {
+			if (obs_frontend_streaming_active()) {
+				obs_frontend_streaming_stop();
+			} else {
+				obs_frontend_streaming_start();
+			}
+		},
+		Qt::QueuedConnection);
+	res.set_content("{\"status\":\"ok\"}", "application/json");
+}
+
+static void handle_api_obs_feature(const httplib::Request &req, httplib::Response &res)
+{
+	REQUIRE_AUTH(req, res)
+	QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(req.body));
+	if (doc.isObject()) {
+		QString feature = doc.object()["feature"].toString();
+		bool state = doc.object()["state"].toBool();
+
+		QMetaObject::invokeMethod(
+			qApp,
+			[feature, state]() {
+				if (feature == "vcam") {
+					if (state) obs_frontend_start_virtualcam();
+					else obs_frontend_stop_virtualcam();
+				} else if (feature == "replay") {
+					if (state) obs_frontend_replay_buffer_start();
+					else obs_frontend_replay_buffer_stop();
+				}
+			},
+			Qt::QueuedConnection);
+		res.set_content("{\"status\":\"ok\"}", "application/json");
+		return;
+	}
+	res.status = 400;
+}
+
+static void handle_api_obs_transition(const httplib::Request &req, httplib::Response &res)
+{
+	REQUIRE_AUTH(req, res)
+	QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(req.body));
+	if (doc.isObject()) {
+		QString transName = doc.object()["transitionName"].toString();
+		QMetaObject::invokeMethod(
+			qApp,
+			[transName]() {
+				obs_source_t *src = obs_get_source_by_name(transName.toUtf8().constData());
+				if (src) {
+					obs_frontend_set_current_transition(src);
+					obs_source_release(src);
+				}
+			},
+			Qt::QueuedConnection);
+		res.set_content("{\"status\":\"ok\"}", "application/json");
+		return;
+	}
+	res.status = 400;
+}
+
 void srtla_web_server_start(int port)
 {
 	if (is_running)
@@ -515,6 +741,13 @@ void srtla_web_server_start(int port)
 	svr->Post("/api/multistream/manage", handle_api_multistream_manage);
 	svr->Post("/api/auth", handle_api_auth);
 	svr->Post("/api/logout", handle_api_logout);
+
+	svr->Get("/api/obs/overview", handle_api_obs_overview);
+	svr->Post("/api/obs/set_scene", handle_api_obs_set_scene);
+	svr->Post("/api/obs/set_source_visibility", handle_api_obs_set_source_visibility);
+	svr->Post("/api/obs/toggle_stream", handle_api_obs_toggle_stream);
+	svr->Post("/api/obs/feature", handle_api_obs_feature);
+	svr->Post("/api/obs/transition", handle_api_obs_transition);
 
 	is_running = true;
 	server_thread = new std::thread([port]() { svr->listen("0.0.0.0", port); });
