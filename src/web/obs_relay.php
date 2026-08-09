@@ -410,6 +410,11 @@ try {
         sendResponse($res);
     }
 
+    if ($action === 'plugin_audio_levels') {
+        $res = proxyPluginApi('/api/audio_levels', 'GET', null, $config['plugin_port']);
+        sendResponse($res);
+    }
+
     if ($action === 'plugin_stream_key') {
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $res = proxyPluginApi('/api/stream_key', $method, $method === 'POST' ? $inputData : null, $config['plugin_port']);

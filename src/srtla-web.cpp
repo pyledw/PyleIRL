@@ -510,12 +510,24 @@ static void handle_api_autoswitch_get(const httplib::Request &req, httplib::Resp
 		const char *rules = config_get_string(global_config, "SRTLA_AutoSwitch", "RulesJSON");
 		const char *noFailover = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
 		const char *visRules = config_get_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON");
+		const char *volRules = config_get_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON");
 		obj["rules"] = rules ? QString(rules) : "[]";
 		obj["no_failover_scenes"] = noFailover ? QString(noFailover) : "[]";
 		obj["visibility_rules"] = visRules ? QString(visRules) : "[]";
+		obj["volume_rules"] = volRules ? QString(volRules) : "[]";
 		obj["delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "Delay"));
 		obj["vis_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay"));
+		obj["vol_enabled"] = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
+		obj["vol_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay"));
 	}
+	QJsonDocument doc(obj);
+	res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
+}
+
+static void handle_api_audio_levels(const httplib::Request &req, httplib::Response &res)
+{
+	REQUIRE_AUTH(req, res)
+	QJsonObject obj = SrtlaAutoSwitcher::instance().getAudioLevels();
 	QJsonDocument doc(obj);
 	res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
 }
@@ -541,10 +553,17 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 		if (obj.contains("visibility_rules"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON",
 					  obj["visibility_rules"].toString().toUtf8().constData());
+		if (obj.contains("volume_rules"))
+			config_set_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON",
+					  obj["volume_rules"].toString().toUtf8().constData());
 		if (obj.contains("delay"))
 			config_set_int(global_config, "SRTLA_AutoSwitch", "Delay", obj["delay"].toInt());
 		if (obj.contains("vis_delay"))
 			config_set_int(global_config, "SRTLA_AutoSwitch", "VisDelay", obj["vis_delay"].toInt());
+		if (obj.contains("vol_enabled"))
+			config_set_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled", obj["vol_enabled"].toBool());
+		if (obj.contains("vol_delay"))
+			config_set_int(global_config, "SRTLA_AutoSwitch", "VolDelay", obj["vol_delay"].toInt());
 		config_save_safe(global_config, "tmp", nullptr);
 
 		QMetaObject::invokeMethod(
@@ -953,6 +972,7 @@ void srtla_web_server_start(int port)
 	svr->Post("/api/obs/toggle_stream", handle_api_obs_toggle_stream);
 	svr->Post("/api/obs/feature", handle_api_obs_feature);
 	svr->Post("/api/obs/transition", handle_api_obs_transition);
+	svr->Get("/api/audio_levels", handle_api_audio_levels);
 
 	is_running = true;
 	server_thread = new std::thread([port]() { svr->listen("0.0.0.0", port); });

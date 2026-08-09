@@ -208,6 +208,13 @@
             <div id="mainstream-metrics" style="background:rgba(0,0,0,0.2); padding:10px; border-radius:5px; font-size:0.9rem;"></div>
         </div>
 
+        <div class="panel" id="audio-levels-panel">
+            <h2>Audio Mix</h2>
+            <div id="audio-meters-container" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="color:var(--text-muted); font-size:0.9rem;">Waiting for audio data...</div>
+            </div>
+        </div>
+
         <div class="panel" id="multistream-dashboard-panel" style="display:none;">
             <h2>Multistream Status</h2>
             <div id="multistream-dashboard-container" style="display:flex; flex-direction:column; gap:10px;"></div>
@@ -311,6 +318,23 @@
             <h2>Source Visibility Rules <button style="float:right; padding:5px 10px;" onclick="addVisAutoSwitchRule()">+ Add</button></h2>
             <table id="vis-rules-table">
                 <tr><th>Min Kbps</th><th>Max Kbps</th><th>Target Source</th><th></th></tr>
+            </table>
+        </div>
+        <div class="panel">
+            <h2>Dynamic Volume Sources <button style="float:right; padding:5px 10px;" onclick="addVolAutoSwitchRule()">+ Add</button></h2>
+            <div class="setting-row">
+                <span>Enable Dynamic Volume Sources</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="setting-vol-autoswitch">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:15px; border-bottom:none;">
+                <label style="margin-bottom:5px; font-weight:bold;">Switch Delay (seconds)</label>
+                <input type="number" id="setting-vol-delay" value="2" min="0" max="60" style="width:100%; box-sizing:border-box;">
+            </div>
+            <table id="vol-rules-table">
+                <tr><th>Audio Source</th><th>Min dB</th><th>Max dB</th><th>Target Layer / Source</th><th></th></tr>
             </table>
             <br>
             <button onclick="saveAutoSwitchRules()">Save All Rules</button>
@@ -602,6 +626,11 @@
                 return;
             }
 
+            const audioData = await relayRequest('plugin_audio_levels', {}, 'GET');
+            if (audioData) {
+                renderAudioMeters(audioData);
+            }
+
             isConnected = true;
             statusInd.className = "status connected";
             statusTxt.innerText = "Connected to OBS";
@@ -832,6 +861,87 @@
             alert("Transition Set!");
         }
 
+        function renderAudioMeters(audioLevels) {
+            const container = document.getElementById('audio-meters-container');
+            if (!container) return;
+
+            const sources = Object.keys(audioLevels).sort();
+            if (sources.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-muted); font-size:0.9rem;">No active audio sources.</div>';
+                return;
+            }
+
+            // Create or update meters
+            sources.forEach(src => {
+                const idHash = btoa(src).replace(/=/g, '');
+                let row = document.getElementById('meter-row-' + idHash);
+                if (!row) {
+                    row = document.createElement('div');
+                    row.id = 'meter-row-' + idHash;
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.gap = '10px';
+                    
+                    const label = document.createElement('div');
+                    label.style.width = '120px';
+                    label.style.fontSize = '0.85rem';
+                    label.style.overflow = 'hidden';
+                    label.style.textOverflow = 'ellipsis';
+                    label.style.whiteSpace = 'nowrap';
+                    label.innerText = src;
+                    
+                    const barBg = document.createElement('div');
+                    barBg.style.flexGrow = '1';
+                    barBg.style.height = '12px';
+                    barBg.style.background = 'rgba(0,0,0,0.5)';
+                    barBg.style.borderRadius = '3px';
+                    barBg.style.overflow = 'hidden';
+                    barBg.style.position = 'relative';
+
+                    const barFill = document.createElement('div');
+                    barFill.id = 'meter-fill-' + idHash;
+                    barFill.style.height = '100%';
+                    barFill.style.width = '0%';
+                    barFill.style.transition = 'width 0.3s ease-out, background-color 0.3s ease-out';
+                    barFill.style.background = 'var(--success)';
+
+                    barBg.appendChild(barFill);
+                    row.appendChild(label);
+                    row.appendChild(barBg);
+                    container.appendChild(row);
+                }
+
+                const db = audioLevels[src];
+                // Map dB to percentage (approx -60dB to 0dB)
+                let pct = 0;
+                if (db > -60) {
+                    pct = ((db + 60) / 60) * 100;
+                }
+                if (pct > 100) pct = 100;
+                
+                const fill = document.getElementById('meter-fill-' + idHash);
+                if (fill) {
+                    fill.style.width = pct + '%';
+                    if (db > -9) {
+                        fill.style.background = '#ff4757'; // Red
+                    } else if (db > -20) {
+                        fill.style.background = '#ffa502'; // Yellow
+                    } else {
+                        fill.style.background = '#2ed573'; // Green
+                    }
+                }
+            });
+
+            // Remove old meters
+            Array.from(container.children).forEach(child => {
+                if (child.id && child.id.startsWith('meter-row-')) {
+                    const hash = child.id.replace('meter-row-', '');
+                    const exists = sources.find(s => btoa(s).replace(/=/g, '') === hash);
+                    if (!exists) child.remove();
+                }
+            });
+        }
+
         async function restartOBS() {
             if(confirm("Are you sure you want to restart OBS?")) {
                 isRestarting = true;
@@ -945,6 +1055,15 @@
             while(visTable.rows.length > 1) visTable.deleteRow(1);
             visRules.forEach(r => addVisAutoSwitchRule(r.minKbps, r.maxKbps, r.sourceName));
             
+            if (document.getElementById('setting-vol-autoswitch')) document.getElementById('setting-vol-autoswitch').checked = !!data.vol_enabled;
+            if (document.getElementById('setting-vol-delay')) document.getElementById('setting-vol-delay').value = data.vol_delay || 2;
+            const volRules = JSON.parse(data.volume_rules || "[]");
+            const volTable = document.getElementById('vol-rules-table');
+            if (volTable) {
+                while(volTable.rows.length > 1) volTable.deleteRow(1);
+                volRules.forEach(r => addVolAutoSwitchRule(r.audioSource, r.minDb, r.maxDb, r.targetSource));
+            }
+
             updateDropdowns();
         }
 
@@ -967,6 +1086,20 @@
                 <td><input type="number" value="${min}" class="rmin"></td>
                 <td><input type="number" value="${max}" class="rmax"></td>
                 <td><select class="rsrc" data-val="${source}"><option value="${source}">${source}</option></select></td>
+                <td><button class="btn-danger" onclick="this.parentElement.parentElement.remove()">X</button></td>
+            `;
+            updateDropdowns();
+        }
+
+        function addVolAutoSwitchRule(audioSource="", minDb=-100, maxDb=-50, targetSource="") {
+            const table = document.getElementById('vol-rules-table');
+            if (!table) return;
+            const row = table.insertRow();
+            row.innerHTML = `
+                <td><select class="rsrc" data-val="${audioSource}"><option value="${audioSource}">${audioSource}</option></select></td>
+                <td><input type="number" value="${minDb}" class="rmin"></td>
+                <td><input type="number" value="${maxDb}" class="rmax"></td>
+                <td><select class="rsrc" data-val="${targetSource}"><option value="${targetSource}">${targetSource}</option></select></td>
                 <td><button class="btn-danger" onclick="this.parentElement.parentElement.remove()">X</button></td>
             `;
             updateDropdowns();
@@ -999,10 +1132,28 @@
                 });
             });
             
+            const volRules = [];
+            const volTable = document.getElementById('vol-rules-table');
+            if (volTable) {
+                volTable.querySelectorAll('tr').forEach((row, i) => {
+                    if(i === 0) return;
+                    const selects = row.querySelectorAll('.rsrc');
+                    volRules.push({
+                        audioSource: selects[0].value,
+                        minDb: parseInt(row.querySelector('.rmin').value),
+                        maxDb: parseInt(row.querySelector('.rmax').value),
+                        targetSource: selects[1].value
+                    });
+                });
+            }
+            
             await relayRequest('plugin_autoswitch', {
                 rules: JSON.stringify(rules),
                 no_failover_scenes: JSON.stringify(noFailover),
-                visibility_rules: JSON.stringify(visRules)
+                visibility_rules: JSON.stringify(visRules),
+                volume_rules: JSON.stringify(volRules),
+                vol_enabled: document.getElementById('setting-vol-autoswitch') ? document.getElementById('setting-vol-autoswitch').checked : false,
+                vol_delay: document.getElementById('setting-vol-delay') ? parseInt(document.getElementById('setting-vol-delay').value) : 2
             }, 'POST');
             alert("Rules saved!");
         }

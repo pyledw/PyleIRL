@@ -1291,6 +1291,21 @@ void SrtlaAutoSwitcher::updateMonitoredAudioSources()
 		}
 	}
 
+	// Always monitor all active audio sources for the Web UI levels
+	obs_enum_sources(
+		[](void *data, obs_source_t *source) {
+			QSet<QString> *needed = static_cast<QSet<QString> *>(data);
+			uint32_t flags = obs_source_get_output_flags(source);
+			if (flags & OBS_SOURCE_AUDIO) {
+				const char *name = obs_source_get_name(source);
+				if (name) {
+					needed->insert(QString::fromUtf8(name));
+				}
+			}
+			return true;
+		},
+		&neededSources);
+
 	// Remove any sources no longer in rules
 	QList<QString> currentKeys = monitoredAudioSources.keys();
 	for (const QString &key : currentKeys) {
@@ -1497,6 +1512,17 @@ static void set_target_source_visibility_all_scenes(const QString &targetName, b
 		}
 	}
 	obs_frontend_source_list_free(&scenes);
+}
+
+QJsonObject SrtlaAutoSwitcher::getAudioLevels()
+{
+	QJsonObject obj;
+	for (auto it = monitoredAudioSources.constBegin(); it != monitoredAudioSources.constEnd(); ++it) {
+		if (it.value()) {
+			obj[it.key()] = (double)it.value()->lastDb;
+		}
+	}
+	return obj;
 }
 
 void SrtlaAutoSwitcher::checkBitrate()

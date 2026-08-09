@@ -136,6 +136,7 @@ public:
 	void start();
 	void stop();
 	void reloadRules();
+	QJsonObject getAudioLevels();
 
 private slots:
 	void checkBitrate();
