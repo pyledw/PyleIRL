@@ -538,6 +538,24 @@
         }
 
         async function relayRequest(action, data = {}, method = 'POST') {
+            if (usePHP) {
+                let url = 'obs_relay.php?action=' + action;
+                if (method === 'GET' && Object.keys(data).length > 0) {
+                    const params = new URLSearchParams(data);
+                    url += '&' + params.toString();
+                    return await apiCall(url, 'GET');
+                }
+                const res = await apiCall(url, method, method === 'POST' ? data : null);
+                if (res && res.status === 'ok') {
+                    if (res.data) return res.data;
+                    if (res.responseData) return res.responseData;
+                    return res;
+                } else if (res && res.status !== 'error') {
+                    return res;
+                }
+                return null;
+            }
+
             // Map actions to native plugin HTTP server /api/ endpoints
             if (action === 'get_overview') return await apiCall('/api/obs/overview');
             if (action === 'set_current_scene') return await apiCall('/api/obs/set_scene', 'POST', data);
@@ -545,6 +563,20 @@
             if (action === 'toggle_stream') return await apiCall('/api/obs/toggle_stream', 'POST', data);
             if (action === 'toggle_feature') return await apiCall('/api/obs/feature', 'POST', data);
             if (action === 'set_transition') return await apiCall('/api/obs/transition', 'POST', data);
+            
+            // Native mapping for get_video_settings, get_record_directory, get_profiles, get_scene_collections, get_inputs, get_input_settings, set_input_settings, set_video_settings, set_record_directory, set_profile, set_scene_collection
+            if (action === 'get_video_settings') return await apiCall('/api/obs/request', 'POST', {requestType: 'GetVideoSettings'});
+            if (action === 'get_record_directory') return await apiCall('/api/obs/request', 'POST', {requestType: 'GetRecordDirectory'});
+            if (action === 'get_profiles') return await apiCall('/api/obs/request', 'POST', {requestType: 'GetProfileList'});
+            if (action === 'get_scene_collections') return await apiCall('/api/obs/request', 'POST', {requestType: 'GetSceneCollectionList'});
+            if (action === 'get_inputs') return await apiCall('/api/obs/request', 'POST', {requestType: 'GetInputList'});
+            if (action === 'get_input_settings') return await apiCall('/api/obs/request', 'POST', {requestType: 'GetInputSettings', requestData: data});
+            if (action === 'set_input_settings') return await apiCall('/api/obs/request', 'POST', {requestType: 'SetInputSettings', requestData: data});
+            if (action === 'set_video_settings') return await apiCall('/api/obs/request', 'POST', {requestType: 'SetVideoSettings', requestData: data});
+            if (action === 'set_record_directory') return await apiCall('/api/obs/request', 'POST', {requestType: 'SetRecordDirectory', requestData: data});
+            if (action === 'set_profile') return await apiCall('/api/obs/request', 'POST', {requestType: 'SetCurrentProfile', requestData: data});
+            if (action === 'set_scene_collection') return await apiCall('/api/obs/request', 'POST', {requestType: 'SetCurrentSceneCollection', requestData: data});
+            
             if (action === 'plugin_settings') return await apiCall('/api/settings', method, data);
             if (action === 'plugin_receivers') return await apiCall('/api/receivers');
             if (action === 'plugin_stats') return await apiCall('/api/stats');
@@ -553,6 +585,7 @@
             if (action === 'plugin_multistream_action') return await apiCall('/api/multistream/action', 'POST', data);
             if (action === 'plugin_multistream_manage') return await apiCall('/api/multistream/manage', 'POST', data);
             if (action === 'plugin_autoswitch') return await apiCall('/api/autoswitch', method, data);
+            if (action === 'plugin_audio_levels') return await apiCall('/api/audio_levels');
             if (action === 'plugin_stream_key') return await apiCall('/api/stream_key', method, data);
             if (action === 'plugin_restart') return await apiCall('/api/restart', 'POST', data);
 
@@ -1328,6 +1361,7 @@
             pollMultistream();
         }
 
+        let usePHP = false;
         async function checkAuth() {
             try {
                 const res = await apiCall('/api/settings');
@@ -1335,6 +1369,7 @@
                     // Check if obs_relay.php is reachable
                     const relayCheck = await apiCall('obs_relay.php?action=get_config');
                     if (relayCheck) {
+                        usePHP = true;
                         init();
                         return;
                     }
