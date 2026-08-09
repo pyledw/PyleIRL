@@ -1258,6 +1258,7 @@ void SrtlaAutoSwitcher::volmeterCallback(void *param, const float magnitude[MAX_
 	// Keep track of the highest peak level in the current measurement interval
 	if (frame_max > mas->lastDb) {
 		mas->lastDb = frame_max;
+		mas->lastUpdateTime = os_gettime_ns();
 	}
 	mas->lastUpdateTime = os_gettime_ns();
 }
@@ -1527,6 +1528,37 @@ QJsonObject SrtlaAutoSwitcher::getAudioLevels()
 
 void SrtlaAutoSwitcher::checkBitrate()
 {
+	// 1. Always update and decay audio meters for the Web UI dashboard (even if autoswitch is disabled)
+	static int audioUpdateCounter = 0;
+	if (audioUpdateCounter++ % 2 == 0) {
+		updateMonitoredAudioSources();
+	}
+
+	uint64_t now = os_gettime_ns();
+	QMap<QString, float> sourceDbMap;
+	for (auto it = monitoredAudioSources.begin(); it != monitoredAudioSources.end(); ++it) {
+		QString srcKey = it.key();
+		MonitoredAudioSource *mas = it.value();
+		if (mas) {
+			if (mas->source && obs_source_muted(mas->source)) {
+				mas->lastDb = -100.0f;
+			} else if (now > mas->lastUpdateTime && (now - mas->lastUpdateTime > 1500000000ULL)) {
+				mas->lastDb = -100.0f;
+			} else {
+				// Decay by 15 dB per second for smooth VU meter and autoswitch threshold
+				mas->lastDb -= 15.0f;
+			}
+			
+			if (mas->lastDb < -100.0f) {
+				mas->lastDb = -100.0f;
+			}
+			
+			sourceDbMap[srcKey] = mas->lastDb;
+		} else {
+			sourceDbMap[srcKey] = -100.0f;
+		}
+	}
+
 	config_t *global_config = obs_frontend_get_profile_config();
 	if (!global_config)
 		return;
@@ -1553,32 +1585,9 @@ void SrtlaAutoSwitcher::checkBitrate()
 		volDelay = 2;
 	}
 
-	// 1. Dynamic Volume Sources Automation (evaluates OBS audio sources)
+	// 2. Dynamic Volume Sources Automation
 	if (volEnabled && !volumeRules.isEmpty()) {
-		// Update monitored sources in case new ones appeared in OBS
-		updateMonitoredAudioSources();
-
 		QSet<int> matchedVolRules;
-		uint64_t now = os_gettime_ns();
-
-		QMap<QString, float> sourceDbMap;
-		for (auto it = monitoredAudioSources.begin(); it != monitoredAudioSources.end(); ++it) {
-			QString srcKey = it.key();
-			MonitoredAudioSource *mas = it.value();
-			float db = -100.0f;
-			if (mas) {
-				if (mas->source && obs_source_muted(mas->source)) {
-					db = -100.0f;
-				} else if (now - mas->lastUpdateTime > 1500000000ULL) {
-					db = -100.0f;
-				} else {
-					db = mas->lastDb;
-				}
-				// Reset peak for the next 1s measurement interval
-				mas->lastDb = -100.0f;
-			}
-			sourceDbMap[srcKey] = db;
-		}
 
 		for (int i = 0; i < volumeRules.size(); i++) {
 			const VolumeVisibilityRule &r = volumeRules[i];
