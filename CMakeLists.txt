@@ -22,6 +22,11 @@ if(ENABLE_FRONTEND_API)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
 endif()
 
+find_path(LIBRIST_INCLUDE_DIR librist/librist.h REQUIRED)
+find_library(LIBRIST_LIBRARY librist REQUIRED)
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${LIBRIST_INCLUDE_DIR})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${LIBRIST_LIBRARY})
+
 if(ENABLE_QT)
   if(APPLE)
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/qt" "/usr/local/opt/qt")
@@ -46,6 +51,7 @@ target_sources(
     src/srtla-stats-filter.c
     src/srtla/srtla_rec.c
     src/srtla/common.c
+    src/rist_rec.c
     src/srtla-ui.cpp
     src/srtla-web.cpp
     src/multistream.cpp

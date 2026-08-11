@@ -9,6 +9,7 @@
 #include <media-io/audio-io.h>
 
 #include "compat_pthread.h"
+#include "rist_rec.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -25,14 +26,27 @@ enum srtla_recovery_action {
 	RECOVERY_RESTART
 };
 
+enum receiver_protocol {
+	PROTOCOL_SRTLA = 0,
+	PROTOCOL_RIST = 1
+};
+
 struct srtla_source {
 	obs_source_t *source;
 	obs_source_t *media_source;
+
+	enum receiver_protocol protocol;
 
 	int listen_port;
 	int local_srt_port;
 	char *listen_ip;
 	char *playback_engine;
+
+	int rist_profile;
+	int rist_buffer_ms;
+	char *rist_passphrase;
+	int rist_key_size;
+	int rist_stream_id;
 
 	pthread_t srtla_thread;
 	volatile int stop_flag;
@@ -242,7 +256,11 @@ static void srtla_create_media_source(struct srtla_source *context)
 	}
 
 	char url[256];
-	snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener", context->local_srt_port);
+	if (context->protocol == PROTOCOL_RIST) {
+		snprintf(url, sizeof(url), "udp://127.0.0.1:%d?pkt_size=1316", context->local_srt_port);
+	} else {
+		snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener", context->local_srt_port);
+	}
 
 	char source_name[256];
 	const char *parent_name = obs_source_get_name(context->source);
@@ -352,6 +370,7 @@ static void srtla_source_destroy(void *data)
 
 	bfree(context->playback_engine);
 	bfree(context->listen_ip);
+	bfree(context->rist_passphrase);
 	bfree(context);
 }
 
@@ -362,13 +381,35 @@ static void *srtla_thread_func(void *data)
 	// Wait a bit to ensure media source is listening
 	os_sleep_ms(500);
 
-	obs_log(LOG_INFO, "[SRTLA] Starting srtla_rec thread on IP %s, port %d, proxying to 127.0.0.1:%d",
-		context->listen_ip ? context->listen_ip : "ANY", context->listen_port, context->local_srt_port);
+	if (context->protocol == PROTOCOL_SRTLA) {
+		obs_log(LOG_INFO, "[SRTLA] Starting srtla_rec thread on IP %s, port %d, proxying to 127.0.0.1:%d",
+			context->listen_ip ? context->listen_ip : "ANY", context->listen_port, context->local_srt_port);
 
-	srtla_rec_main(context->listen_ip, context->listen_port, "127.0.0.1", context->local_srt_port,
-		       &context->stop_flag);
+		srtla_rec_main(context->listen_ip, context->listen_port, "127.0.0.1", context->local_srt_port,
+			       &context->stop_flag);
+	} else if (context->protocol == PROTOCOL_RIST) {
+		obs_log(LOG_INFO, "[RIST] Starting RIST receiver on IP %s, port %d", 
+			context->listen_ip ? context->listen_ip : "ANY", context->listen_port);
+			
+		struct rist_config r_cfg = {0};
+		if (context->listen_ip) {
+			strncpy(r_cfg.listen_ip, context->listen_ip, sizeof(r_cfg.listen_ip) - 1);
+		}
+		r_cfg.listen_port = context->listen_port;
+		r_cfg.local_srt_port = context->local_srt_port;
+		r_cfg.stop_flag = &context->stop_flag;
+		r_cfg.profile = context->rist_profile;
+		r_cfg.buffer_ms = context->rist_buffer_ms;
+		if (context->rist_passphrase) {
+			strncpy(r_cfg.passphrase, context->rist_passphrase, sizeof(r_cfg.passphrase) - 1);
+		}
+		r_cfg.key_size = context->rist_key_size;
+		r_cfg.stream_id = context->rist_stream_id;
 
-	obs_log(LOG_INFO, "[SRTLA] srtla_rec thread exited");
+		rist_rec_main(&r_cfg);
+	}
+
+	obs_log(LOG_INFO, "[SRTLA/RIST] receiver thread exited");
 	return NULL;
 }
 
@@ -378,6 +419,9 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 	__try {
 #endif
 		struct srtla_source *context = data;
+
+		const char *new_proto_str = obs_data_get_string(settings, "protocol");
+		enum receiver_protocol new_proto = (new_proto_str && strcmp(new_proto_str, "rist") == 0) ? PROTOCOL_RIST : PROTOCOL_SRTLA;
 
 		long long new_listen_port = obs_data_get_int(settings, "listen_port");
 		long long new_local_srt_port = obs_data_get_int(settings, "local_srt_port");
@@ -459,13 +503,32 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			context->playback_engine = bstrdup(new_engine);
 		}
 
-		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || engine_changed);
+		const char *new_passphrase = obs_data_get_string(settings, "rist_passphrase");
+		bool config_changed = false;
+		if (context->protocol != new_proto) config_changed = true;
+		if (context->rist_profile != obs_data_get_int(settings, "rist_profile")) config_changed = true;
+		if (context->rist_buffer_ms != obs_data_get_int(settings, "rist_buffer_ms")) config_changed = true;
+		if (context->rist_key_size != obs_data_get_int(settings, "rist_key_size")) config_changed = true;
+		if (context->rist_stream_id != obs_data_get_int(settings, "rist_stream_id")) config_changed = true;
+		if (new_passphrase && (!context->rist_passphrase || strcmp(context->rist_passphrase, new_passphrase) != 0)) config_changed = true;
+		else if (!new_passphrase && context->rist_passphrase) config_changed = true;
+
+		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || engine_changed || context->protocol != new_proto);
 		bool thread_restart_needed = (context->listen_port != new_listen_port ||
-					      context->local_srt_port != new_local_srt_port || listen_ip_changed ||
+					      context->local_srt_port != new_local_srt_port || listen_ip_changed || config_changed ||
 					      !context->thread_running);
 
 		if (thread_restart_needed || media_restart_needed) {
 			srtla_stop_thread(context);
+
+			context->protocol = new_proto;
+			context->rist_profile = (int)obs_data_get_int(settings, "rist_profile");
+			context->rist_buffer_ms = (int)obs_data_get_int(settings, "rist_buffer_ms");
+			context->rist_key_size = (int)obs_data_get_int(settings, "rist_key_size");
+			context->rist_stream_id = (int)obs_data_get_int(settings, "rist_stream_id");
+			
+			if (context->rist_passphrase) bfree(context->rist_passphrase);
+			context->rist_passphrase = new_passphrase ? bstrdup(new_passphrase) : NULL;
 
 			context->listen_port = (int)new_listen_port;
 			context->local_srt_port = (int)new_local_srt_port;
@@ -536,11 +599,36 @@ static void srtla_source_hide(void *data)
 	if (context->media_source) obs_source_dec_showing(context->media_source);
 }
 
+static bool protocol_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	const char *proto = obs_data_get_string(settings, "protocol");
+	bool is_rist = (proto && strcmp(proto, "rist") == 0);
+
+	obs_property_set_visible(obs_properties_get(props, "rist_profile"), is_rist);
+	obs_property_set_visible(obs_properties_get(props, "rist_buffer_ms"), is_rist);
+	obs_property_set_visible(obs_properties_get(props, "rist_passphrase"), is_rist);
+	obs_property_set_visible(obs_properties_get(props, "rist_key_size"), is_rist);
+	obs_property_set_visible(obs_properties_get(props, "rist_stream_id"), is_rist);
+
+	obs_property_set_description(obs_properties_get(props, "listen_ip"), 
+		is_rist ? "RIST Bind IP (empty for ANY)" : "SRTLA Bind IP (empty for ANY)");
+	obs_property_set_description(obs_properties_get(props, "listen_port"), 
+		is_rist ? "RIST Listen Port (UDP)" : "SRTLA Listen Port (UDP)");
+	
+	return true;
+}
+
 static obs_properties_t *srtla_source_get_properties(void *data)
 {
 	UNUSED_PARAMETER(data);
 	obs_properties_t *props = obs_properties_create();
 	obs_properties_set_flags(props, OBS_PROPERTIES_DEFER_UPDATE);
+
+	obs_property_t *proto_list = obs_properties_add_list(props, "protocol", "Protocol", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(proto_list, "SRTLA (Bonded SRT)", "srtla");
+	obs_property_list_add_string(proto_list, "RIST (Reliable Internet Stream Transport)", "rist");
+	obs_property_set_modified_callback(proto_list, protocol_changed);
 
 	obs_property_t *engine_list = obs_properties_add_list(props, "playback_engine", "Playback Engine", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(engine_list, "FFmpeg (Built-in Media Source)", "ffmpeg");
@@ -548,17 +636,39 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 
 	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
 	obs_properties_add_int(props, "listen_port", "SRTLA Listen Port (UDP)", 1, 65535, 1);
-	obs_properties_add_int(props, "local_srt_port", "Local SRT Port", 1, 65535, 1);
+	
+	obs_property_t *prof_list = obs_properties_add_list(props, "rist_profile", "RIST Profile", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(prof_list, "Simple", 0);
+	obs_property_list_add_int(prof_list, "Main", 1);
+	obs_property_list_add_int(prof_list, "Advanced", 2);
+	
+	obs_properties_add_int(props, "rist_buffer_ms", "RIST Buffer / Latency (ms)", 0, 30000, 100);
+	obs_properties_add_text(props, "rist_passphrase", "RIST Encryption Passphrase", OBS_TEXT_PASSWORD);
+	
+	obs_property_t *key_list = obs_properties_add_list(props, "rist_key_size", "RIST Key Size", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(key_list, "128", 128);
+	obs_property_list_add_int(key_list, "256", 256);
+	
+	obs_properties_add_int(props, "rist_stream_id", "RIST Stream ID (0 for default)", 0, 65535, 1);
+
+	obs_properties_add_int(props, "local_srt_port", "Local Internal Relay Port", 1, 65535, 1);
 
 	return props;
 }
 
 static void srtla_source_get_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_string(settings, "protocol", "srtla");
 	obs_data_set_default_string(settings, "playback_engine", "ffmpeg");
 	obs_data_set_default_string(settings, "listen_ip", "");
 	obs_data_set_default_int(settings, "listen_port", 5000);
 	obs_data_set_default_int(settings, "local_srt_port", 4000);
+	
+	obs_data_set_default_int(settings, "rist_profile", 1);
+	obs_data_set_default_int(settings, "rist_buffer_ms", 1000);
+	obs_data_set_default_string(settings, "rist_passphrase", "");
+	obs_data_set_default_int(settings, "rist_key_size", 128);
+	obs_data_set_default_int(settings, "rist_stream_id", 0);
 }
 
 struct obs_source_info srtla_source_info = {
@@ -815,9 +925,10 @@ void srtla_get_all_receivers_json(char *out_buffer, int max_len)
 			first = false;
 			const char *name = obs_source_get_name(s->source);
 			offset += snprintf(out_buffer + offset, max_len - offset,
-					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s}",
+					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\"}",
 					   name ? name : "Unknown", s->listen_port,
-					   s->thread_running ? "true" : "false");
+					   s->thread_running ? "true" : "false",
+					   s->protocol == PROTOCOL_RIST ? "rist" : "srtla");
 		}
 		pthread_mutex_unlock(&sources_mutex);
 		snprintf(out_buffer + offset, max_len - offset, "]");

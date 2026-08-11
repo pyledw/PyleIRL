@@ -196,6 +196,7 @@ void SrtlaStatusWidget::updateStatus()
 				QString name = rObj["name"].toString();
 				QString port = QString::number(rObj["listen_port"].toInt());
 				bool running = rObj["running"].toVariant().toBool();
+				QString protocol = rObj.contains("protocol") ? rObj["protocol"].toString().toUpper() : "SRTLA";
 				
 				currentReceiverNames.insert(name);
 
@@ -213,7 +214,7 @@ void SrtlaStatusWidget::updateStatus()
 					receiversTable->insertRow(foundRow);
 					receiversTable->setRowHeight(foundRow, 40);
 
-					QTableWidgetItem *nameItem = new QTableWidgetItem(name + " (" + port + ")");
+					QTableWidgetItem *nameItem = new QTableWidgetItem(QString("[%1] %2 (%3)").arg(protocol, name, port));
 					nameItem->setData(Qt::UserRole, name);
 					nameItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
@@ -261,7 +262,7 @@ void SrtlaStatusWidget::updateStatus()
 				}
 
 				QTableWidgetItem *nameItem = receiversTable->item(foundRow, 0);
-				if (nameItem) nameItem->setText(name + " (" + port + ")");
+				if (nameItem) nameItem->setText(QString("[%1] %2 (%3)").arg(protocol, name, port));
 
 				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 1);
 				if (statusItem) {
