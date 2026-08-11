@@ -210,10 +210,15 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 
 static void *srtla_source_create(obs_data_t *settings, obs_source_t *source)
 {
-	UNUSED_PARAMETER(settings);
 	struct srtla_source *context = bzalloc(sizeof(struct srtla_source));
 	context->source = source;
 	context->thread_running = false;
+	
+	if (settings) {
+		const char *proto = obs_data_get_string(settings, "protocol");
+		context->protocol = (proto && strcmp(proto, "rist") == 0) ? PROTOCOL_RIST : PROTOCOL_SRTLA;
+		context->listen_port = (int)obs_data_get_int(settings, "listen_port");
+	}
 
 	pthread_mutex_lock(&sources_mutex);
 	context->next = sources_head;
@@ -343,6 +348,9 @@ void srtla_reload_media_source(void *data)
 		struct srtla_source *context = data;
 		if (!context) return;
 		obs_log(LOG_INFO, "[SRTLA] Reloading internal media player for port %d to resync stream...", context->listen_port);
+		
+		// Ensure we destroy the old media source before creating a new one to prevent memory leaks and crashes
+		srtla_destroy_media_source(context);
 		srtla_create_media_source(context);
 #ifdef _WIN32
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -537,6 +545,8 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			context->listen_ip = new_listen_ip ? bstrdup(new_listen_ip) : NULL;
 
 			if (media_restart_needed) {
+				// Destroy any existing media source to prevent thread leaks which crash OBS on exit
+				srtla_destroy_media_source(context);
 				srtla_create_media_source(context);
 			}
 

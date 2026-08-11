@@ -21,7 +21,12 @@ struct rist_config {
     int stream_id;         // Optional stream ID
 };
 
+// Receiver API
 int rist_rec_main(const struct rist_config *config);
+
+// Stats API
+void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
+void rist_get_connection_details(char* out_buffer, int max_len);
 
 #ifdef __cplusplus
 }

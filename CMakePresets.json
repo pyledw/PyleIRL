@@ -19,7 +19,7 @@
       "displayName": "macOS Universal",
       "description": "Build for macOS 12.0+ (Universal binary)",
       "inherits": ["template"],
-      "binaryDir": "${sourceDir}/build_macos",
+      "binaryDir": "${sourceDir}/build",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -50,7 +50,7 @@
       "displayName": "Windows x64",
       "description": "Build for Windows x64",
       "inherits": ["template"],
-      "binaryDir": "${sourceDir}/build_x64",
+      "binaryDir": "${sourceDir}/build",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -74,7 +74,7 @@
       "displayName": "Ubuntu x86_64",
       "description": "Build for Ubuntu x86_64",
       "inherits": ["template"],
-      "binaryDir": "${sourceDir}/build_x86_64",
+      "binaryDir": "${sourceDir}/build",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",

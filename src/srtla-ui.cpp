@@ -41,6 +41,9 @@ void srtla_force_reload_all();
 char *srtla_get_frpc_path(void);
 bool srtla_is_audio_starved(int listen_port);
 void srtla_auto_recover_hung_sources();
+
+void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
+void rist_get_connection_details(char *out_buffer, int max_len);
 }
 
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("SRTLA Status", parent)
@@ -183,6 +186,18 @@ void SrtlaStatusWidget::updateStatus()
 
 		srtla_get_connection_stats(&is_listening, &groups, &connections);
 		srtla_get_connection_details(&listen_port, &failed_conns, details_buffer, sizeof(details_buffer));
+		
+		bool rist_listening = false;
+		int rist_groups = 0;
+		int rist_conns = 0;
+		char rist_details_buffer[4096] = {0};
+		rist_get_connection_stats(&rist_listening, &rist_groups, &rist_conns);
+		rist_get_connection_details(rist_details_buffer, sizeof(rist_details_buffer));
+		
+		is_listening = is_listening || rist_listening;
+		groups += rist_groups;
+		connections += rist_conns;
+
 		srtla_get_all_receivers_json(receivers_buffer, sizeof(receivers_buffer));
 
 		double totalBitrateKbps = 0.0;
@@ -299,10 +314,18 @@ void SrtlaStatusWidget::updateStatus()
 		}
 
 		QJsonDocument doc = QJsonDocument::fromJson(QByteArray(details_buffer));
+		QJsonDocument ristDoc = QJsonDocument::fromJson(QByteArray(rist_details_buffer));
 
-		if (doc.isObject()) {
+		if (doc.isObject() || ristDoc.isObject()) {
 			QJsonObject root = doc.object();
 			QJsonArray groupsArray = root["groups"].toArray();
+			
+			if (ristDoc.isObject()) {
+				QJsonArray ristGroups = ristDoc.object()["groups"].toArray();
+				for (int i = 0; i < ristGroups.size(); i++) {
+					groupsArray.append(ristGroups[i]);
+				}
+			}
 
 			// Keep track of which items exist to remove stale ones
 			QSet<QString> currentGroupIds;
@@ -1651,9 +1674,18 @@ void SrtlaAutoSwitcher::checkBitrate()
 	int listen_port = 0;
 	int failed_conns = 0;
 	char details_buffer[4096] = {0};
+	char rist_details_buffer[4096] = {0};
 
 	srtla_get_connection_stats(&is_listening, &groups, &connections);
 	srtla_get_connection_details(&listen_port, &failed_conns, details_buffer, sizeof(details_buffer));
+	
+	bool rist_listening = false;
+	int rist_groups = 0;
+	int rist_conns = 0;
+	rist_get_connection_stats(&rist_listening, &rist_groups, &rist_conns);
+	rist_get_connection_details(rist_details_buffer, sizeof(rist_details_buffer));
+	
+	is_listening = is_listening || rist_listening;
 
 	if (!is_listening) {
 		currentMatchedRuleIndex = -1;
@@ -1667,11 +1699,20 @@ void SrtlaAutoSwitcher::checkBitrate()
 	int activeGroupsWithData = 0;
 
 	QJsonDocument doc = QJsonDocument::fromJson(QByteArray(details_buffer));
+	QJsonDocument ristDoc = QJsonDocument::fromJson(QByteArray(rist_details_buffer));
+	
+	QJsonArray allGroupsArray;
 	if (doc.isObject()) {
-		QJsonObject root = doc.object();
-		QJsonArray groupsArray = root["groups"].toArray();
-		for (int i = 0; i < groupsArray.size(); i++) {
-			QJsonObject gObj = groupsArray[i].toObject();
+		QJsonArray srtlaGroups = doc.object()["groups"].toArray();
+		for (int i = 0; i < srtlaGroups.size(); i++) allGroupsArray.append(srtlaGroups[i]);
+	}
+	if (ristDoc.isObject()) {
+		QJsonArray ristGroups = ristDoc.object()["groups"].toArray();
+		for (int i = 0; i < ristGroups.size(); i++) allGroupsArray.append(ristGroups[i]);
+	}
+
+	for (int i = 0; i < allGroupsArray.size(); i++) {
+		QJsonObject gObj = allGroupsArray[i].toObject();
 			QString groupIdStr = QString::number(gObj["id"].toVariant().toULongLong());
 
 			QJsonArray connsArray = gObj["conns"].toArray();
@@ -1697,7 +1738,6 @@ void SrtlaAutoSwitcher::checkBitrate()
 			totalKbps += calculatedSumKbps;
 			activeGroupsWithData++;
 		}
-	}
 
 	// Clean up previousBytes for disconnected groups
 	if (activeGroupsWithData == 0) {

@@ -24,8 +24,9 @@ endif()
 
 find_path(LIBRIST_INCLUDE_DIR librist/librist.h REQUIRED)
 find_library(LIBRIST_LIBRARY librist REQUIRED)
+find_library(JANSSON_LIBRARY jansson REQUIRED)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${LIBRIST_INCLUDE_DIR})
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${LIBRIST_LIBRARY})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${LIBRIST_LIBRARY} ${JANSSON_LIBRARY})
 
 if(ENABLE_QT)
   if(APPLE)

@@ -20,11 +20,16 @@
 #include <QStandardPaths>
 extern "C" {
 void srtla_proxy_settings_changed();
-void srtla_get_all_receivers_json(char *out_buffer, int max_len);
+void srtla_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
 void srtla_get_connection_details(int *listen_port, int *failed_conns, char *out_buffer, int max_len);
+void srtla_get_all_receivers_json(char *out_buffer, int max_len);
 void srtla_force_start_by_name(const char *name);
 void srtla_force_stop_by_name(const char *name);
 void srtla_force_restart_by_name(const char *name);
+void srtla_force_restart_all();
+
+void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
+void rist_get_connection_details(char *out_buffer, int max_len);
 }
 
 static httplib::Server *svr = nullptr;
@@ -589,9 +594,42 @@ static void handle_api_stats(const httplib::Request &req, httplib::Response &res
 	int listen_port = 0, failed = 0;
 	char buf[4096] = {0};
 	srtla_get_connection_details(&listen_port, &failed, buf, sizeof(buf));
-	if (strlen(buf) == 0)
-		strcpy(buf, "{}");
-	res.set_content(buf, "application/json");
+	
+	char rist_buf[4096] = {0};
+	rist_get_connection_details(rist_buf, sizeof(rist_buf));
+
+	QJsonDocument doc = QJsonDocument::fromJson(QByteArray(buf));
+	QJsonDocument ristDoc = QJsonDocument::fromJson(QByteArray(rist_buf));
+	
+	QJsonObject root;
+	if (doc.isObject()) {
+		root = doc.object();
+	} else {
+		root["groups"] = QJsonArray();
+		root["ports"] = QJsonArray();
+	}
+	
+	if (ristDoc.isObject()) {
+		QJsonArray groups = root["groups"].toArray();
+		QJsonArray ristGroups = ristDoc.object()["groups"].toArray();
+		for (int i = 0; i < ristGroups.size(); i++) {
+			groups.append(ristGroups[i]);
+		}
+		root["groups"] = groups;
+
+		QJsonArray ports = root["ports"].toArray();
+		QJsonArray ristPorts = ristDoc.object()["ports"].toArray();
+		for (int i = 0; i < ristPorts.size(); i++) {
+			ports.append(ristPorts[i]);
+		}
+		root["ports"] = ports;
+	}
+	
+	QJsonDocument mergedDoc(root);
+	QString outJson = mergedDoc.toJson(QJsonDocument::Compact);
+	if (outJson.isEmpty() || outJson == "null")
+		outJson = "{}";
+	res.set_content(outJson.toStdString(), "application/json");
 }
 
 static void handle_api_receiver_action(const httplib::Request &req, httplib::Response &res)

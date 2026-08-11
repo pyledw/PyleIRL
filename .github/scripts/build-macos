@@ -139,12 +139,12 @@ build() {
     build
   )
 
-  pushd build_macos
+  pushd build
   run_xcodebuild ${build_args}
   popd
 
   log_group "Installing ${product_name}..."
-  cmake --install build_macos --config ${config} --prefix "${project_root}/release/${config}"
+  cmake --install build --config ${config} --prefix "${project_root}/release/${config}"
 
   popd
   log_group

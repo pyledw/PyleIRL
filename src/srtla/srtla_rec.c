@@ -97,8 +97,8 @@ static inline int get_addr_len(const struct sockaddr *addr) {
 #define MAX_GROUPS          200
 
 #define CLEANUP_PERIOD 3
-#define GROUP_TIMEOUT  10
-#define CONN_TIMEOUT   10
+#define GROUP_TIMEOUT  120
+#define CONN_TIMEOUT   120
 
 #define RECV_ACK_INT 10
 #ifndef min
