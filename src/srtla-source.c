@@ -86,18 +86,21 @@ bool srtla_is_audio_starved(int listen_port) {
 			int groups = srtla_get_group_count_by_port(curr->listen_port);
 			if (groups > 0) {
 				uint64_t now = os_gettime_ns();
-				// Only flag starved if video is active for >12s with zero audio ever received,
-				// or if audio was active and completely stopped for >= 8s while video is active,
-				// or if audio is severely degraded (< 30kHz) for >= 6s.
-				if (curr->last_audio_time == 0) {
-					if (curr->last_video_time > 0 && curr->connected_since > 0 &&
-					    (now - curr->connected_since >= 12000000000ULL)) {
+				// Only flag starved if video is active (received in the last 2s) and:
+				// 1. connection is >12s old with zero audio ever received, or
+				// 2. audio was active and completely stopped for >= 8s, or
+				// 3. audio is severely degraded (< 30kHz).
+				bool active_video = (curr->last_video_time > 0 && (now - curr->last_video_time < 2000000000ULL));
+				if (active_video) {
+					if (curr->last_audio_time == 0) {
+						if (curr->connected_since > 0 && (now - curr->connected_since >= 12000000000ULL)) {
+							starved = true;
+						}
+					} else if (now - curr->last_audio_time >= 8000000000ULL) {
+						starved = true;
+					} else if (curr->current_stream_hz > 0 && curr->current_stream_hz < 30000.0) {
 						starved = true;
 					}
-				} else if (curr->last_video_time > 0 && (now - curr->last_audio_time >= 8000000000ULL)) {
-					starved = true;
-				} else if (curr->current_stream_hz > 0 && curr->current_stream_hz < 30000.0) {
-					starved = true;
 				}
 			}
 			break;
