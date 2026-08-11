@@ -367,6 +367,20 @@ void rist_get_connection_stats(bool *is_listening, int *active_groups, int *acti
     pthread_mutex_unlock(&global_rist_mutex);
 }
 
+int rist_get_peer_count_by_port(int listen_port) {
+    int count = 0;
+    pthread_mutex_lock(&global_rist_mutex);
+    for (int i = 0; i < MAX_RIST_INSTANCES; i++) {
+        rist_ctx_info_t *info = global_rist_contexts[i];
+        if (info && info->listen_port == listen_port && info->is_listening) {
+            count = info->peer_count;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&global_rist_mutex);
+    return count;
+}
+
 void rist_get_connection_details(char* out_buffer, int max_len) {
     if (!out_buffer || max_len <= 0) return;
     

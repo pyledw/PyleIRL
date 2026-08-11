@@ -83,7 +83,12 @@ bool srtla_is_audio_starved(int listen_port) {
 	bool starved = false;
 	while (curr) {
 		if (curr->listen_port == listen_port) {
-			int groups = srtla_get_group_count_by_port(curr->listen_port);
+			int groups = 0;
+			if (curr->protocol == PROTOCOL_RIST) {
+				groups = rist_get_peer_count_by_port(curr->listen_port);
+			} else {
+				groups = srtla_get_group_count_by_port(curr->listen_port);
+			}
 			if (groups > 0) {
 				uint64_t now = os_gettime_ns();
 				// Only flag starved if video is active (received in the last 2s) and:
@@ -265,7 +270,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 
 	char url[256];
 	if (context->protocol == PROTOCOL_RIST) {
-		snprintf(url, sizeof(url), "udp://127.0.0.1:%d?pkt_size=1316", context->local_srt_port);
+		snprintf(url, sizeof(url), "udp://127.0.0.1:%d?pkt_size=1316&buffer_size=8388608&fifo_size=500000", context->local_srt_port);
 	} else {
 		snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener", context->local_srt_port);
 	}
@@ -818,7 +823,12 @@ void srtla_auto_recover_hung_sources()
 	for (struct srtla_source *s = sources_head; s; s = s->next) {
 		if (!s->thread_running) continue;
 		
-		int groups = srtla_get_group_count_by_port(s->listen_port);
+		int groups = 0;
+		if (s->protocol == PROTOCOL_RIST) {
+			groups = rist_get_peer_count_by_port(s->listen_port);
+		} else {
+			groups = srtla_get_group_count_by_port(s->listen_port);
+		}
 		if (groups > 0) {
 			if (s->connected_since == 0) {
 				s->connected_since = now;
