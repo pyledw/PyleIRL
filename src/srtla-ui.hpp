@@ -59,11 +59,7 @@ private:
 #include <QTableWidget>
 #include <QVector>
 
-struct AutoSwitchRule {
-	int minKbps;
-	int maxKbps; // 0 means unlimited
-	QString targetScene;
-};
+// Removed AutoSwitchRule since it's now simple Primary/Failover logic
 
 struct SourceVisibilityRule {
 	int minKbps;
@@ -95,15 +91,14 @@ public:
 
 private slots:
 	void saveSettings();
-	void addNewRule();
 	void addNewVisibilityRule();
 	void addNewVolumeRule();
 
 private:
 	QComboBox *enableAutoSwitch;
 	QSpinBox *switchDelay;
-	QSpinBox *recoveryDelay;
-	QTableWidget *rulesTable;
+	QComboBox *primarySceneBox;
+	QComboBox *failoverSceneBox;
 	QListWidget *noFailoverList;
 
 	QComboBox *enableVisSwitch;
@@ -117,8 +112,6 @@ private:
 	QStringList availableScenes;
 	QStringList availableSources;
 	QStringList availableAudioSources;
-
-	void addRuleRow(int minKbps, int maxKbps, const QString &targetScene);
 	void addVisibilityRuleRow(int minKbps, int maxKbps, const QString &sourceName);
 	void addVolumeRuleRow(const QString &audioSource, int minDb, int maxDb, const QString &targetSource);
 };
@@ -148,12 +141,12 @@ private:
 	QTimer *timer;
 	QMap<QString, uint64_t> previousBytes;
 
-	QVector<AutoSwitchRule> rules;
+	QString primaryScene;
+	QString failoverScene;
 	QVector<SourceVisibilityRule> visibilityRules;
 	QVector<VolumeVisibilityRule> volumeRules;
 	QSet<QString> noFailoverScenes;
-	int currentMatchedRuleIndex;
-	int currentlyAppliedRuleIndex;
+	bool isCurrentlyFailover;
 	int matchDurationCounter;
 
 	QSet<int> currentMatchedVisRules;

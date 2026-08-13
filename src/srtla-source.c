@@ -67,6 +67,7 @@ struct srtla_source {
 	double current_stream_hz;
 	uint64_t ts_window_start;
 	uint64_t frames_in_window;
+	bool needs_reload;
 
 	struct srtla_source *next;
 };
@@ -116,6 +117,25 @@ bool srtla_is_audio_starved(int listen_port) {
 	return starved;
 }
 
+#ifdef _WIN32
+__declspec(dllexport)
+#endif
+bool srtla_is_any_media_playing() {
+	pthread_mutex_lock(&sources_mutex);
+	struct srtla_source *curr = sources_head;
+	bool playing = false;
+	uint64_t now = os_gettime_ns();
+	while (curr) {
+		if (curr->last_audio_time > 0 && (now - curr->last_audio_time < 1000000000ULL)) {
+			playing = true;
+			break;
+		}
+		curr = curr->next;
+	}
+	pthread_mutex_unlock(&sources_mutex);
+	return playing;
+}
+
 static const char *srtla_source_get_name(void *type_data)
 {
 	UNUSED_PARAMETER(type_data);
@@ -161,6 +181,10 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 		if (drift > -50000000LL && drift < 50000000LL) {
 			expected_ts += (drift / 32);
 		} else {
+			if (drift > 1000000000LL || drift < -1000000000LL) {
+				obs_log(LOG_INFO, "[SRTLA] Massive PTS discontinuity detected (drift: %.2f sec). Scheduling internal media player reload to resync.", (double)drift / 1000000000.0);
+				context->needs_reload = true;
+			}
 			// Large PTS discontinuity / resync (e.g. stream reconnect): jump directly to new timestamp
 			expected_ts = audio_data->timestamp;
 		}
@@ -322,7 +346,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_set_int(media_settings, "reconnect_delay_sec", 1);
 		obs_data_set_int(media_settings, "buffering_mb", 0);
 		obs_data_set_string(media_settings, "ffmpeg_options",
-				    "fflags=nobuffer+discardcorrupt+genpts probesize=32768 analyzeduration=500000");
+				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000");
 
 		context->media_source = obs_source_create_private("ffmpeg_source", source_name, media_settings);
 		obs_data_release(media_settings);
@@ -689,6 +713,29 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "rist_stream_id", 0);
 }
 
+static void srtla_source_video_tick(void *data, float seconds)
+{
+	UNUSED_PARAMETER(seconds);
+	struct srtla_source *context = data;
+	
+	if (context) {
+		uint64_t now = os_gettime_ns();
+		// Auto-recovery for severe audio distortion or starvation
+		if (context->last_audio_time > 0 && context->current_stream_hz > 0 && context->current_stream_hz < 35000.0) {
+			if (now - context->last_recovery_time > 8000000000ULL) { // 8 second cooldown
+				obs_log(LOG_WARNING, "[SRTLA] Audio starvation/distortion detected on port %d (%.1f Hz). Auto-reloading internal media player.", context->listen_port, context->current_stream_hz);
+				context->needs_reload = true;
+				context->last_recovery_time = now;
+			}
+		}
+
+		if (context->needs_reload) {
+			context->needs_reload = false;
+			srtla_reload_media_source(context);
+		}
+	}
+}
+
 struct obs_source_info srtla_source_info = {
 	.id = "srtla_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
@@ -705,6 +752,7 @@ struct obs_source_info srtla_source_info = {
 	.show = srtla_source_show,
 	.hide = srtla_source_hide,
 	.video_render = srtla_source_video_render,
+	.video_tick = srtla_source_video_tick,
 	.get_width = srtla_source_get_width,
 	.get_height = srtla_source_get_height,
 };

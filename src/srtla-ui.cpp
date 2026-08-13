@@ -40,6 +40,7 @@ void srtla_force_reload_by_name(const char *name);
 void srtla_force_reload_all();
 char *srtla_get_frpc_path(void);
 bool srtla_is_audio_starved(int listen_port);
+bool srtla_is_any_media_playing();
 void srtla_auto_recover_hung_sources();
 
 void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
@@ -761,10 +762,8 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	switchDelay->setSuffix(" seconds");
 	switchDelay->setValue(2); // Default 2 seconds
 
-	recoveryDelay = new QSpinBox();
-	recoveryDelay->setRange(0, 60);
-	recoveryDelay->setSuffix(" seconds");
-	recoveryDelay->setValue(4); // Default 4 seconds
+	primarySceneBox = new QComboBox();
+	failoverSceneBox = new QComboBox();
 
 	// Populate scenes
 	struct obs_frontend_source_list scenes = {};
@@ -811,22 +810,15 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		&availableAudioSources);
 	availableAudioSources.sort();
 
-	sceneLayout->addRow("Enable Range-Based Auto-Switch:", enableAutoSwitch);
-	sceneLayout->addRow("Switch Delay:", switchDelay);
-	sceneLayout->addRow("Time before Switch Back:", recoveryDelay);
+	for (const QString &sceneName : availableScenes) {
+		primarySceneBox->addItem(sceneName);
+		failoverSceneBox->addItem(sceneName);
+	}
 
-	rulesTable = new QTableWidget();
-	rulesTable->setColumnCount(4);
-	rulesTable->setHorizontalHeaderLabels(QStringList()
-					      << "Min Kbps" << "Max Kbps (0=unlimited)" << "Target Scene" << "");
-	rulesTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-	rulesTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-
-	QPushButton *addRuleBtn = new QPushButton("Add Scene Rule");
-	connect(addRuleBtn, &QPushButton::clicked, this, &SrtlaAutoSwitchDialog::addNewRule);
-
-	sceneLayout->addRow(rulesTable);
-	sceneLayout->addRow(addRuleBtn);
+	sceneLayout->addRow("Enable Media Auto-Switch:", enableAutoSwitch);
+	sceneLayout->addRow("Primary (Live) Scene:", primarySceneBox);
+	sceneLayout->addRow("Failover (Disconnected) Scene:", failoverSceneBox);
+	sceneLayout->addRow("Switch Delay (Failover only):", switchDelay);
 
 	noFailoverList = new QListWidget();
 	noFailoverList->setMaximumHeight(120);
@@ -922,34 +914,16 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 			switchDelay->setValue(delay);
 		}
 
-		int recDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay");
-		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "RecoveryDelay")) {
-			recoveryDelay->setValue(recDelay);
-		} else {
-			recoveryDelay->setValue(4);
+		const char *primaryStr = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryScene");
+		if (primaryStr && *primaryStr) {
+			int idx = primarySceneBox->findText(QString::fromUtf8(primaryStr));
+			if (idx >= 0) primarySceneBox->setCurrentIndex(idx);
 		}
 
-		int visDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
-		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "VisDelay")) {
-			visSwitchDelay->setValue(visDelay);
-		}
-
-		int volDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay");
-		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "VolDelay")) {
-			volSwitchDelay->setValue(volDelay);
-		}
-
-		const char *rulesJson = config_get_string(global_config, "SRTLA_AutoSwitch", "RulesJSON");
-		if (rulesJson && *rulesJson) {
-			QJsonDocument doc = QJsonDocument::fromJson(QByteArray(rulesJson));
-			if (doc.isArray()) {
-				QJsonArray arr = doc.array();
-				for (int i = 0; i < arr.size(); i++) {
-					QJsonObject obj = arr[i].toObject();
-					addRuleRow(obj["minKbps"].toInt(), obj["maxKbps"].toInt(),
-						   obj["targetScene"].toString());
-				}
-			}
+		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
+		if (failoverStr && *failoverStr) {
+			int idx = failoverSceneBox->findText(QString::fromUtf8(failoverStr));
+			if (idx >= 0) failoverSceneBox->setCurrentIndex(idx);
 		}
 
 		const char *noFailoverJson = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
@@ -998,44 +972,6 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	}
 }
 
-void SrtlaAutoSwitchDialog::addRuleRow(int minKbps, int maxKbps, const QString &targetScene)
-{
-	int row = rulesTable->rowCount();
-	rulesTable->insertRow(row);
-
-	QSpinBox *minSp = new QSpinBox();
-	minSp->setRange(0, 999999);
-	minSp->setValue(minKbps);
-	rulesTable->setCellWidget(row, 0, minSp);
-
-	QSpinBox *maxSp = new QSpinBox();
-	maxSp->setRange(0, 999999);
-	maxSp->setValue(maxKbps);
-	rulesTable->setCellWidget(row, 1, maxSp);
-
-	QComboBox *sceneCb = new QComboBox();
-	sceneCb->addItems(availableScenes);
-	int index = sceneCb->findText(targetScene);
-	if (index >= 0)
-		sceneCb->setCurrentIndex(index);
-	rulesTable->setCellWidget(row, 2, sceneCb);
-
-	QPushButton *removeBtn = new QPushButton("Remove");
-	connect(removeBtn, &QPushButton::clicked, [this, removeBtn]() {
-		for (int i = 0; i < rulesTable->rowCount(); i++) {
-			if (rulesTable->cellWidget(i, 3) == removeBtn) {
-				rulesTable->removeRow(i);
-				break;
-			}
-		}
-	});
-	rulesTable->setCellWidget(row, 3, removeBtn);
-}
-
-void SrtlaAutoSwitchDialog::addNewRule()
-{
-	addRuleRow(0, 0, availableScenes.isEmpty() ? "" : availableScenes[0]);
-}
 
 void SrtlaAutoSwitchDialog::addVisibilityRuleRow(int minKbps, int maxKbps, const QString &sourceName)
 {
@@ -1140,32 +1076,14 @@ void SrtlaAutoSwitchDialog::saveSettings()
 	if (global_config) {
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "Enabled", enableAutoSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "Delay", switchDelay->value());
-		config_set_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay", recoveryDelay->value());
+		config_set_string(global_config, "SRTLA_AutoSwitch", "PrimaryScene", primarySceneBox->currentText().toUtf8().constData());
+		config_set_string(global_config, "SRTLA_AutoSwitch", "FailoverScene", failoverSceneBox->currentText().toUtf8().constData());
 
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled", enableVisSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "VisDelay", visSwitchDelay->value());
 
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled", enableVolSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "VolDelay", volSwitchDelay->value());
-
-		QJsonArray arr;
-		for (int i = 0; i < rulesTable->rowCount(); i++) {
-			QSpinBox *minSp = qobject_cast<QSpinBox *>(rulesTable->cellWidget(i, 0));
-			QSpinBox *maxSp = qobject_cast<QSpinBox *>(rulesTable->cellWidget(i, 1));
-			QComboBox *sceneCb = qobject_cast<QComboBox *>(rulesTable->cellWidget(i, 2));
-
-			if (minSp && maxSp && sceneCb) {
-				QJsonObject obj;
-				obj["minKbps"] = minSp->value();
-				obj["maxKbps"] = maxSp->value();
-				obj["targetScene"] = sceneCb->currentText();
-				arr.append(obj);
-			}
-		}
-		QJsonDocument doc(arr);
-		QString jsonString = doc.toJson(QJsonDocument::Compact);
-
-		config_set_string(global_config, "SRTLA_AutoSwitch", "RulesJSON", jsonString.toUtf8().constData());
 
 		QJsonArray noFailoverArr;
 		for (int i = 0; i < noFailoverList->count(); i++) {
@@ -1232,8 +1150,7 @@ void SrtlaAutoSwitchDialog::saveSettings()
 SrtlaAutoSwitcher::SrtlaAutoSwitcher(QObject *parent)
 	: QObject(parent),
 	  timer(new QTimer(this)),
-	  currentMatchedRuleIndex(-1),
-	  currentlyAppliedRuleIndex(-1),
+	  isCurrentlyFailover(false),
 	  matchDurationCounter(0),
 	  visMatchDurationCounter(0),
 	  volMatchDurationCounter(0)
@@ -1375,50 +1292,35 @@ void SrtlaAutoSwitcher::handleFrontendEvent(enum obs_frontend_event event, void 
 	SrtlaAutoSwitcher *switcher = static_cast<SrtlaAutoSwitcher *>(private_data);
 	if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
 		// If the user manually changes the scene while a rule is applied,
-		// we check if they navigated away from the rule's target scene.
-		if (switcher->currentlyAppliedRuleIndex >= 0 &&
-		    switcher->currentlyAppliedRuleIndex < switcher->rules.size()) {
-			const AutoSwitchRule &rule = switcher->rules[switcher->currentlyAppliedRuleIndex];
+		obs_source_t *currentScene = obs_frontend_get_current_scene();
+		const char *currentName = currentScene ? obs_source_get_name(currentScene) : nullptr;
 
-			obs_source_t *currentScene = obs_frontend_get_current_scene();
-			const char *currentName = currentScene ? obs_source_get_name(currentScene) : nullptr;
-
-			if (currentName && QString::fromUtf8(currentName) != rule.targetScene) {
-				// User manually navigated away from the auto-switched scene.
-				// Reset state so we are back in "manual" mode.
-				switcher->originalSceneName = "";
-				switcher->currentlyAppliedRuleIndex = -1;
-			}
-			if (currentScene)
-				obs_source_release(currentScene);
+		if (currentName && QString::fromUtf8(currentName) != switcher->failoverScene) {
+			// User manually navigated away from the auto-switched scene.
+			// Reset state so we are back in "manual" mode.
+			switcher->originalSceneName = "";
+			switcher->isCurrentlyFailover = false;
 		}
+		if (currentScene)
+			obs_source_release(currentScene);
 	}
 }
 
 void SrtlaAutoSwitcher::loadRules()
 {
-	rules.clear();
+	primaryScene = "";
+	failoverScene = "";
 	visibilityRules.clear();
 	volumeRules.clear();
 	noFailoverScenes.clear();
 
 	config_t *global_config = obs_frontend_get_profile_config();
 	if (global_config) {
-		const char *rulesJson = config_get_string(global_config, "SRTLA_AutoSwitch", "RulesJSON");
-		if (rulesJson && *rulesJson) {
-			QJsonDocument doc = QJsonDocument::fromJson(QByteArray(rulesJson));
-			if (doc.isArray()) {
-				QJsonArray arr = doc.array();
-				for (int i = 0; i < arr.size(); i++) {
-					QJsonObject obj = arr[i].toObject();
-					AutoSwitchRule r;
-					r.minKbps = obj["minKbps"].toInt();
-					r.maxKbps = obj["maxKbps"].toInt();
-					r.targetScene = obj["targetScene"].toString();
-					rules.append(r);
-				}
-			}
-		}
+		const char *primaryStr = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryScene");
+		if (primaryStr) primaryScene = QString::fromUtf8(primaryStr);
+
+		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
+		if (failoverStr) failoverScene = QString::fromUtf8(failoverStr);
 
 		const char *noFailoverJson = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
 		if (noFailoverJson && *noFailoverJson) {
@@ -1471,7 +1373,7 @@ void SrtlaAutoSwitcher::loadRules()
 void SrtlaAutoSwitcher::start()
 {
 	loadRules();
-	currentMatchedRuleIndex = -1;
+	isCurrentlyFailover = false;
 	matchDurationCounter = 0;
 
 	currentMatchedVisRules.clear();
@@ -1591,9 +1493,9 @@ void SrtlaAutoSwitcher::checkBitrate()
 	bool visEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled");
 	bool volEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
 
-	if ((!enabled || rules.isEmpty()) && (!visEnabled || visibilityRules.isEmpty()) &&
+	if ((!enabled || primaryScene.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty()) &&
 	    (!volEnabled || volumeRules.isEmpty())) {
-		currentMatchedRuleIndex = -1;
+		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
 		currentMatchedVisRules.clear();
 		visMatchDurationCounter = 0;
@@ -1659,8 +1561,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 	}
 
 	// 2. SRTLA Bitrate-based Automation (Scene Auto-Switcher & KBPS Source Visibility)
-	if ((!enabled || rules.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
-		currentMatchedRuleIndex = -1;
+	if ((!enabled || primaryScene.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
+		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
 		currentMatchedVisRules.clear();
 		visMatchDurationCounter = 0;
@@ -1688,7 +1590,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	is_listening = is_listening || rist_listening;
 
 	if (!is_listening) {
-		currentMatchedRuleIndex = -1;
+		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
 		currentMatchedVisRules.clear();
 		visMatchDurationCounter = 0;
@@ -1745,7 +1647,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 		totalKbps = 0; // Ensure 0 if no active data
 	}
 
-	if (enabled && !rules.isEmpty()) {
+	if (enabled && !primaryScene.isEmpty() && !failoverScene.isEmpty()) {
 		obs_source_t *currentScene = obs_frontend_get_current_scene();
 		QString currentSceneName;
 		if (currentScene) {
@@ -1758,92 +1660,49 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 		if (noFailoverScenes.contains(currentSceneName)) {
 			// Current scene is marked as No Failover: auto scene switching is disabled
-			currentMatchedRuleIndex = -1;
+			isCurrentlyFailover = false;
 			matchDurationCounter = 0;
-			currentlyAppliedRuleIndex = -1;
 			originalSceneName = "";
 		} else {
-			// Find matching rule
-			int matchedRule = -1;
-			for (int i = 0; i < rules.size(); i++) {
-				if (totalKbps >= rules[i].minKbps &&
-				    (rules[i].maxKbps == 0 || totalKbps < rules[i].maxKbps)) {
-					matchedRule = i;
-					break; // Stop at first match
-				}
-			}
+			bool mediaIsPlaying = srtla_is_any_media_playing();
 
-			if (matchedRule != currentMatchedRuleIndex) {
-				// Bitrate changed to a different rule range (or outside all ranges)
-				currentMatchedRuleIndex = matchedRule;
-				matchDurationCounter = 0;
-			}
-
-			if (currentMatchedRuleIndex >= 0) {
-				matchDurationCounter++;
-				if (matchDurationCounter >= delay &&
-				    currentMatchedRuleIndex != currentlyAppliedRuleIndex) {
-					// Apply rule
-					const AutoSwitchRule &rule = rules[currentMatchedRuleIndex];
-
-					// Build target scenes set to check if current scene is a primary scene
-					QSet<QString> targetScenes;
-					for (const auto &r : rules) {
-						targetScenes.insert(r.targetScene);
-					}
-
-					obs_source_t *currScene = obs_frontend_get_current_scene();
-					if (currScene) {
-						const char *currName = obs_source_get_name(currScene);
-						if (currName) {
-							QString currNameStr = QString::fromUtf8(currName);
-							if (currNameStr != rule.targetScene) {
-								if (!targetScenes.contains(currNameStr) &&
-								    originalSceneName.isEmpty()) {
-									// Only save the original scene if it's a primary scene (not in targetScenes)
-									originalSceneName = currNameStr;
-								}
-
-								obs_source_t *targetSceneSrc = obs_get_source_by_name(
-									rule.targetScene.toUtf8().constData());
-								if (targetSceneSrc) {
-									obs_frontend_set_current_scene(targetSceneSrc);
-									obs_source_release(targetSceneSrc);
-									currentlyAppliedRuleIndex =
-										currentMatchedRuleIndex;
-								}
-							} else {
-								// Already on the target scene, just update index
-								currentlyAppliedRuleIndex =
-									currentMatchedRuleIndex;
+			if (!mediaIsPlaying) {
+				// Media buffer is completely starved/empty
+				if (!isCurrentlyFailover) {
+					matchDurationCounter++;
+					if (matchDurationCounter >= delay) {
+						// Delay met, switch to failover
+						if (currentSceneName != failoverScene) {
+							// If we are not on the primary scene, save this scene so we can restore it later
+							if (currentSceneName != primaryScene && originalSceneName.isEmpty()) {
+								originalSceneName = currentSceneName;
+							}
+							obs_source_t *targetSceneSrc = obs_get_source_by_name(failoverScene.toUtf8().constData());
+							if (targetSceneSrc) {
+								obs_frontend_set_current_scene(targetSceneSrc);
+								obs_source_release(targetSceneSrc);
 							}
 						}
-						obs_source_release(currScene);
+						isCurrentlyFailover = true;
 					}
 				}
 			} else {
-				// No rules match (bitrate is outside of all configured low-bitrate ranges, i.e., recovered)
-
-				int recoveryDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "RecoveryDelay");
-				if (!config_has_user_value(global_config, "SRTLA_AutoSwitch",
-							   "RecoveryDelay")) {
-					recoveryDelay = 4;
-				}
-
-				int totalRecoveryDelay = delay + recoveryDelay;
-
-				matchDurationCounter++;
-				if (matchDurationCounter >= totalRecoveryDelay && currentlyAppliedRuleIndex != -1) {
+				// Media buffer is successfully delivering frames
+				matchDurationCounter = 0;
+				if (isCurrentlyFailover) {
+					// Immediately switch back to Primary (or original) scene with NO delay
+					QString targetToRestore = primaryScene;
 					if (!originalSceneName.isEmpty()) {
-						obs_source_t *prevSceneSrc = obs_get_source_by_name(
-							originalSceneName.toUtf8().constData());
-						if (prevSceneSrc) {
-							obs_frontend_set_current_scene(prevSceneSrc);
-							obs_source_release(prevSceneSrc);
-						}
+						targetToRestore = originalSceneName;
 						originalSceneName = "";
 					}
-					currentlyAppliedRuleIndex = -1;
+
+					obs_source_t *targetSceneSrc = obs_get_source_by_name(targetToRestore.toUtf8().constData());
+					if (targetSceneSrc) {
+						obs_frontend_set_current_scene(targetSceneSrc);
+						obs_source_release(targetSceneSrc);
+					}
+					isCurrentlyFailover = false;
 				}
 			}
 		}
