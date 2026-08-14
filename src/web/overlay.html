@@ -206,8 +206,10 @@
         // Function to fetch and update stats
         async function updateStats() {
             try {
+                const cacheBuster = `?t=${Date.now()}`;
+                
                 // Fetch Overview (Scene, Status)
-                const resOverview = await fetch('/api/obs/overview');
+                const resOverview = await fetch('/api/obs/overview' + cacheBuster);
                 if (resOverview.ok) {
                     const data = await resOverview.json();
                     document.getElementById('val-scene').textContent = data.current_program_scene || 'Unknown';
@@ -223,7 +225,7 @@
                 }
 
                 // Fetch Stats (Bitrate)
-                const resStats = await fetch('/api/stats');
+                const resStats = await fetch('/api/stats' + cacheBuster);
                 if (resStats.ok) {
                     const data = await resStats.json();
                     let totalKbps = 0;
@@ -265,7 +267,7 @@
                 }
 
                 // Fetch Receivers (Audio Drift, Audio DB)
-                const resReceivers = await fetch('/api/receivers');
+                const resReceivers = await fetch('/api/receivers' + cacheBuster);
                 if (resReceivers.ok) {
                     const data = await resReceivers.json();
                     if (data && data.length > 0) {
