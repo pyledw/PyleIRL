@@ -986,6 +986,30 @@ void srtla_web_server_start(int port)
 		}
 	});
 
+	svr->Get("/overlay", [](const httplib::Request &, httplib::Response &res) {
+		QFile file(":/web/overlay.html");
+		if (file.open(QIODevice::ReadOnly)) {
+			res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+			res.set_header("Pragma", "no-cache");
+			res.set_content(file.readAll().toStdString(), "text/html");
+		} else {
+			res.status = 404;
+			res.set_content("Not Found", "text/plain");
+		}
+	});
+
+	svr->Get("/overlay/config", [](const httplib::Request &, httplib::Response &res) {
+		QFile file(":/web/overlay_config.html");
+		if (file.open(QIODevice::ReadOnly)) {
+			res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+			res.set_header("Pragma", "no-cache");
+			res.set_content(file.readAll().toStdString(), "text/html");
+		} else {
+			res.status = 404;
+			res.set_content("Not Found", "text/plain");
+		}
+	});
+
 	svr->Get("/api/settings", handle_api_settings_get);
 	svr->Post("/api/settings", handle_api_settings_post);
 	svr->Post("/api/obs/screenshot", handle_api_obs_screenshot);

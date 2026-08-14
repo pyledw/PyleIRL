@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Stream Overlay</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Inter', sans-serif;
+            background: transparent; /* Must be transparent for OBS Browser Source */
+            color: white;
+            overflow: hidden;
+        }
+
+        .overlay-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: max-content;
+        }
+
+        .metric-card {
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+        }
+
+        .metric-icon {
+            font-size: 1.2rem;
+            opacity: 0.8;
+            width: 24px;
+            text-align: center;
+        }
+
+        .metric-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .metric-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #aaa;
+            font-weight: 600;
+        }
+
+        .metric-value {
+            font-size: 1.1rem;
+            font-weight: 800;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
+
+        /* Status Colors */
+        .status-live { color: #4CAF50; }
+        .status-offline { color: #F44336; }
+        .status-warning { color: #FFC107; }
+
+        /* Hide elements based on URL params */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <div class="overlay-container">
+        <div id="card-status" class="metric-card">
+            <div class="metric-icon">📡</div>
+            <div class="metric-content">
+                <div class="metric-label">Live Status</div>
+                <div id="val-status" class="metric-value status-offline">OFFLINE</div>
+            </div>
+        </div>
+
+        <div id="card-kbps" class="metric-card">
+            <div class="metric-icon">⚡</div>
+            <div class="metric-content">
+                <div class="metric-label">Bitrate</div>
+                <div id="val-kbps" class="metric-value">0 kbps</div>
+            </div>
+        </div>
+
+        <div id="card-scene" class="metric-card">
+            <div class="metric-icon">🎬</div>
+            <div class="metric-content">
+                <div class="metric-label">Current Scene</div>
+                <div id="val-scene" class="metric-value">-</div>
+            </div>
+        </div>
+
+        <div id="card-sync" class="metric-card">
+            <div class="metric-icon">⏱️</div>
+            <div class="metric-content">
+                <div class="metric-label">Audio Drift</div>
+                <div id="val-sync" class="metric-value">0 ms</div>
+            </div>
+        </div>
+
+        <div id="card-db" class="metric-card">
+            <div class="metric-icon">🔊</div>
+            <div class="metric-content">
+                <div class="metric-label">Audio Level</div>
+                <div id="val-db" class="metric-value">-100.0 dB</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        
+        // Visibility logic based on URL args (?kbps=off&scene=off)
+        const toggles = ['kbps', 'scene', 'sync', 'status', 'db'];
+        toggles.forEach(t => {
+            if (params.get(t) === 'off') {
+                document.getElementById(`card-${t}`).classList.add('hidden');
+            }
+        });
+
+        // Function to fetch and update stats
+        async function updateStats() {
+            try {
+                // Fetch Overview (Scene, Status)
+                const resOverview = await fetch('/api/obs/overview');
+                if (resOverview.ok) {
+                    const data = await resOverview.json();
+                    document.getElementById('val-scene').textContent = data.current_program_scene || 'Unknown';
+                    
+                    const statusEl = document.getElementById('val-status');
+                    if (data.stream_status && data.stream_status.outputActive) {
+                        statusEl.textContent = 'LIVE';
+                        statusEl.className = 'metric-value status-live';
+                    } else {
+                        statusEl.textContent = 'OFFLINE';
+                        statusEl.className = 'metric-value status-offline';
+                    }
+                }
+
+                // Fetch Stats (Bitrate)
+                const resStats = await fetch('/api/stats');
+                if (resStats.ok) {
+                    const data = await resStats.json();
+                    let totalKbps = 0;
+                    if (data.groups) {
+                        data.groups.forEach(g => {
+                            if(g.bitrate_kbps) totalKbps += g.bitrate_kbps;
+                        });
+                    }
+                    document.getElementById('val-kbps').textContent = `${Math.round(totalKbps)} kbps`;
+                }
+
+                // Fetch Receivers (Audio Drift, Audio DB)
+                const resReceivers = await fetch('/api/receivers');
+                if (resReceivers.ok) {
+                    const data = await resReceivers.json();
+                    if (data && data.length > 0) {
+                        // Assuming the first running receiver is the main one
+                        const activeReceiver = data.find(r => r.running) || data[0];
+                        
+                        const drift = activeReceiver.audio_drift_ms || 0;
+                        const syncEl = document.getElementById('val-sync');
+                        syncEl.textContent = `${drift} ms`;
+                        if (Math.abs(drift) > 100) {
+                            syncEl.style.color = '#F44336'; // Red if high drift
+                        } else if (Math.abs(drift) > 50) {
+                            syncEl.style.color = '#FFC107'; // Yellow if med drift
+                        } else {
+                            syncEl.style.color = 'white';
+                        }
+
+                        const db = activeReceiver.audio_db !== undefined ? activeReceiver.audio_db : -100.0;
+                        document.getElementById('val-db').textContent = `${db.toFixed(1)} dB`;
+                    }
+                }
+
+            } catch (err) {
+                console.error("Error fetching stats:", err);
+            }
+        }
+
+        // Poll every 1 second
+        setInterval(updateStats, 1000);
+        updateStats();
+    </script>
+</body>
+</html>

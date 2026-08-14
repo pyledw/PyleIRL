@@ -1,6 +1,8 @@
 <RCC>
     <qresource prefix="/">
         <file>web/index.html</file>
+        <file>web/overlay.html</file>
+        <file>web/overlay_config.html</file>
         <file>pyle-logo.png</file>
     </qresource>
 </RCC>

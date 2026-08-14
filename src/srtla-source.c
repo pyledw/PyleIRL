@@ -14,6 +14,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <math.h>
 
 extern int srtla_rec_main(const char *listen_ip, int listen_port, const char *srt_host, int srt_port,
 			  volatile int *stop_flag);
@@ -69,6 +70,7 @@ struct srtla_source {
 	uint64_t frames_in_window;
 	bool needs_reload;
 	int64_t current_audio_drift;
+	float current_audio_db;
 
 	struct srtla_source *next;
 };
@@ -166,6 +168,18 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 		out.data[i] = audio_data->data[i];
 	}
 	out.frames = audio_data->frames;
+
+	float max_peak = 1e-9f;
+	for (uint32_t c = 0; c < out.speakers; c++) {
+		if (out.data[c]) {
+			float *ch_data = (float *)out.data[c];
+			for (uint32_t i = 0; i < out.frames; i++) {
+				float val = fabsf(ch_data[i]);
+				if (val > max_peak) max_peak = val;
+			}
+		}
+	}
+	context->current_audio_db = 20.0f * log10f(max_peak);
 
 	// Monotonic sample-accurate timestamp smoothing to eliminate jitter-induced drops in OBS
 	uint64_t sample_rate = (out.samples_per_sec > 0) ? (uint64_t)out.samples_per_sec : 48000ULL;
@@ -1005,11 +1019,12 @@ void srtla_get_all_receivers_json(char *out_buffer, int max_len)
 			first = false;
 			const char *name = obs_source_get_name(s->source);
 			offset += snprintf(out_buffer + offset, max_len - offset,
-					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\",\"audio_drift_ms\":%lld}",
+					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\",\"audio_drift_ms\":%lld,\"audio_db\":%.1f}",
 					   name ? name : "Unknown", s->listen_port,
 					   s->thread_running ? "true" : "false",
 					   s->protocol == PROTOCOL_RIST ? "rist" : "srtla",
-					   (long long)(s->current_audio_drift / 1000000LL));
+					   (long long)(s->current_audio_drift / 1000000LL),
+					   s->current_audio_db);
 		}
 		pthread_mutex_unlock(&sources_mutex);
 		snprintf(out_buffer + offset, max_len - offset, "]");

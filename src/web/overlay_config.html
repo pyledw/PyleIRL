@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Overlay Configuration</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 40px;
+            font-family: 'Inter', sans-serif;
+            background: #1e1e1e;
+            color: #eee;
+        }
+
+        h1 { margin-top: 0; }
+
+        .container {
+            display: flex;
+            gap: 40px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .controls {
+            flex: 1;
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        .preview {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .checkbox-group {
+            margin-bottom: 15px;
+        }
+
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            font-size: 1.1rem;
+        }
+
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+        }
+
+        .url-box {
+            background: #111;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            word-break: break-all;
+            border: 1px solid #444;
+            color: #4CAF50;
+            font-size: 1.1rem;
+        }
+
+        iframe {
+            width: 100%;
+            height: 600px;
+            border: 2px dashed #444;
+            background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAOklEQVQYV2NkYGAwYkAD////Z4TRMIIApgFkRSADcIphGkE02TRj1YxLM7Ji0gO4XEK2k80fDAwMAP8pLxf78rKTAAAAAElFTkSuQmCC');
+            /* Checkerboard background for transparent iframe preview */
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="controls">
+            <h1>Overlay Configurator</h1>
+            <p>Select which metrics you want to display on your stream overlay.</p>
+            
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="chk-status" checked onchange="updatePreview()"> Live Status</label>
+            </div>
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="chk-kbps" checked onchange="updatePreview()"> Bitrate (kbps)</label>
+            </div>
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="chk-scene" checked onchange="updatePreview()"> Current Scene</label>
+            </div>
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="chk-sync" checked onchange="updatePreview()"> Audio Drift</label>
+            </div>
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="chk-db" checked onchange="updatePreview()"> Audio DB Level</label>
+            </div>
+
+            <h3 style="margin-top: 40px;">Browser Source URL</h3>
+            <p>Copy this URL into an OBS Browser Source:</p>
+            <div class="url-box" id="url-box"></div>
+        </div>
+
+        <div class="preview">
+            <h3>Live Preview</h3>
+            <iframe id="preview-frame" src="/overlay"></iframe>
+        </div>
+    </div>
+
+    <script>
+        function updatePreview() {
+            const baseUrl = window.location.origin + "/overlay";
+            const params = new URLSearchParams();
+
+            const fields = ['status', 'kbps', 'scene', 'sync', 'db'];
+            fields.forEach(f => {
+                if (!document.getElementById(`chk-${f}`).checked) {
+                    params.append(f, 'off');
+                }
+            });
+
+            const finalUrl = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
+            
+            document.getElementById('url-box').textContent = finalUrl;
+            document.getElementById('preview-frame').src = `/overlay${params.toString() ? '?' + params.toString() : ''}`;
+        }
+
+        // Initialize
+        updatePreview();
+    </script>
+</body>
+</html>
