@@ -582,7 +582,6 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 
 static void handle_api_receivers(const httplib::Request &req, httplib::Response &res)
 {
-	REQUIRE_AUTH(req, res)
 	char buf[4096] = {0};
 	srtla_get_all_receivers_json(buf, sizeof(buf));
 	res.set_content(buf, "application/json");
@@ -590,7 +589,6 @@ static void handle_api_receivers(const httplib::Request &req, httplib::Response 
 
 static void handle_api_stats(const httplib::Request &req, httplib::Response &res)
 {
-	REQUIRE_AUTH(req, res)
 	int listen_port = 0, failed = 0;
 	char buf[4096] = {0};
 	srtla_get_connection_details(&listen_port, &failed, buf, sizeof(buf));
@@ -744,7 +742,6 @@ static void handle_api_multistream_manage(const httplib::Request &req, httplib::
 
 static void handle_api_obs_overview(const httplib::Request &req, httplib::Response &res)
 {
-	REQUIRE_AUTH(req, res)
 	QJsonObject obj;
 	obj["status"] = "ok";
 	obj["connected"] = true;
