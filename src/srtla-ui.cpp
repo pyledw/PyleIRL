@@ -47,7 +47,7 @@ void rist_get_connection_stats(bool *is_listening, int *active_groups, int *acti
 void rist_get_connection_details(char *out_buffer, int max_len);
 }
 
-SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("SRTLA Status", parent)
+SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("Bonding Status", parent)
 {
 	setObjectName("srtla_status_dock");
 
