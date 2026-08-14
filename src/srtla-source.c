@@ -68,6 +68,7 @@ struct srtla_source {
 	uint64_t ts_window_start;
 	uint64_t frames_in_window;
 	bool needs_reload;
+	int64_t current_audio_drift;
 
 	struct srtla_source *next;
 };
@@ -176,6 +177,7 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	} else {
 		uint64_t expected_ts = context->last_audio_ts + frame_duration_ns;
 		int64_t drift = (int64_t)audio_data->timestamp - (int64_t)expected_ts;
+		context->current_audio_drift = drift;
 		
 		// If drift is within +/-50ms, gently nudge towards source clock without causing pitch or audio drop glitches
 		if (drift > -50000000LL && drift < 50000000LL) {
@@ -1003,10 +1005,11 @@ void srtla_get_all_receivers_json(char *out_buffer, int max_len)
 			first = false;
 			const char *name = obs_source_get_name(s->source);
 			offset += snprintf(out_buffer + offset, max_len - offset,
-					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\"}",
+					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\",\"audio_drift_ms\":%lld}",
 					   name ? name : "Unknown", s->listen_port,
 					   s->thread_running ? "true" : "false",
-					   s->protocol == PROTOCOL_RIST ? "rist" : "srtla");
+					   s->protocol == PROTOCOL_RIST ? "rist" : "srtla",
+					   (long long)(s->current_audio_drift / 1000000LL));
 		}
 		pthread_mutex_unlock(&sources_mutex);
 		snprintf(out_buffer + offset, max_len - offset, "]");

@@ -213,6 +213,7 @@ void SrtlaStatusWidget::updateStatus()
 				QString port = QString::number(rObj["listen_port"].toInt());
 				bool running = rObj["running"].toVariant().toBool();
 				QString protocol = rObj.contains("protocol") ? rObj["protocol"].toString().toUpper() : "SRTLA";
+				long long drift_ms = rObj.contains("audio_drift_ms") ? (long long)rObj["audio_drift_ms"].toDouble() : 0;
 				
 				currentReceiverNames.insert(name);
 
@@ -282,7 +283,11 @@ void SrtlaStatusWidget::updateStatus()
 
 				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 1);
 				if (statusItem) {
-					statusItem->setText(running ? "Running" : "Stopped");
+					QString statusText = running ? "Running" : "Stopped";
+					if (running) {
+						statusText += QString(" (Drift: %1ms)").arg(drift_ms);
+					}
+					statusItem->setText(statusText);
 					statusItem->setForeground(running ? QBrush(QColor("#4CAF50")) : QBrush(QColor("gray")));
 				}
 
