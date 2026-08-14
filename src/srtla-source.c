@@ -68,6 +68,7 @@ struct srtla_source {
 	double current_stream_hz;
 	uint64_t ts_window_start;
 	uint64_t frames_in_window;
+	bool needs_reload;
 	int64_t current_audio_drift;
 	float current_audio_db;
 	int auto_reset_count;
