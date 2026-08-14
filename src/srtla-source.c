@@ -61,6 +61,7 @@ struct srtla_source {
 	
 	uint64_t last_audio_time;
 	uint64_t last_video_time;
+	uint64_t last_media_time;
 	uint64_t connected_since;
 	uint64_t starved_since;
 	uint64_t last_recovery_time;
@@ -130,9 +131,17 @@ bool srtla_is_any_media_playing() {
 	bool playing = false;
 	uint64_t now = os_gettime_ns();
 	while (curr) {
-		if (curr->last_video_time > 0 && (now - curr->last_video_time < 1000000000ULL)) {
-			playing = true;
-			break;
+		bool has_audio = (curr->last_audio_time > 0);
+		if (has_audio) {
+			if (now - curr->last_audio_time < 1000000000ULL) {
+				playing = true;
+				break;
+			}
+		} else {
+			if (curr->last_video_time > 0 && (now - curr->last_video_time < 1000000000ULL)) {
+				playing = true;
+				break;
+			}
 		}
 		curr = curr->next;
 	}
@@ -628,7 +637,11 @@ static void srtla_source_video_render(void *data, gs_effect_t *effect)
 	if (context->media_source) {
 		obs_source_video_render(context->media_source);
 		if (obs_source_get_base_width(context->media_source) > 0) {
-			context->last_video_time = os_gettime_ns();
+			uint64_t current_media_time = obs_source_media_get_time(context->media_source);
+			if (current_media_time != context->last_media_time || current_media_time == 0) {
+				context->last_video_time = os_gettime_ns();
+				context->last_media_time = current_media_time;
+			}
 		}
 	}
 }
