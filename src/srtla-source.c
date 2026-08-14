@@ -126,7 +126,7 @@ bool srtla_is_any_media_playing() {
 	bool playing = false;
 	uint64_t now = os_gettime_ns();
 	while (curr) {
-		if (curr->last_audio_time > 0 && (now - curr->last_audio_time < 1000000000ULL)) {
+		if (curr->last_video_time > 0 && (now - curr->last_video_time < 1000000000ULL)) {
 			playing = true;
 			break;
 		}
@@ -309,7 +309,15 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_t *vlc_settings = obs_data_create();
 		obs_data_array_t *playlist = obs_data_array_create();
 		obs_data_t *item = obs_data_create();
-		obs_data_set_string(item, "value", url);
+		
+		char vlc_url[256];
+		if (context->protocol == PROTOCOL_RIST) {
+			snprintf(vlc_url, sizeof(vlc_url), "udp://@127.0.0.1:%d", context->local_srt_port);
+		} else {
+			strncpy(vlc_url, url, sizeof(vlc_url));
+		}
+		
+		obs_data_set_string(item, "value", vlc_url);
 		obs_data_array_push_back(playlist, item);
 		obs_data_release(item);
 
@@ -720,15 +728,6 @@ static void srtla_source_video_tick(void *data, float seconds)
 	
 	if (context) {
 		uint64_t now = os_gettime_ns();
-		// Auto-recovery for severe audio distortion or starvation
-		if (context->last_audio_time > 0 && context->current_stream_hz > 0 && context->current_stream_hz < 35000.0) {
-			if (now - context->last_recovery_time > 8000000000ULL) { // 8 second cooldown
-				obs_log(LOG_WARNING, "[SRTLA] Audio starvation/distortion detected on port %d (%.1f Hz). Auto-reloading internal media player.", context->listen_port, context->current_stream_hz);
-				context->needs_reload = true;
-				context->last_recovery_time = now;
-			}
-		}
-
 		if (context->needs_reload) {
 			context->needs_reload = false;
 			srtla_reload_media_source(context);
@@ -909,8 +908,12 @@ void srtla_auto_recover_hung_sources()
 				s->starved_since = 0;
 			}
 
+			// Condition D: Audio is receiving normally, but video has completely stopped for >= 8s
+			bool video_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) &&
+					      s->last_video_time > 0 && (now - s->last_video_time >= 8000000000ULL));
+
 			// Only attempt auto-recovery up to 2 times to avoid looping on video-only or mic-less streams
-			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved)) {
+			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved || video_dropped)) {
 				s->recovery_attempts++;
 				s->last_recovery_time = now;
 				s->starved_since = 0;
@@ -922,6 +925,10 @@ void srtla_auto_recover_hung_sources()
 				} else if (audio_dropped) {
 					obs_log(LOG_WARNING,
 						"[SRTLA] Port %d audio stopped for >8s while video active! Auto-reloading media player (attempt %d/2).",
+						s->listen_port, s->recovery_attempts);
+				} else if (video_dropped) {
+					obs_log(LOG_WARNING,
+						"[SRTLA] Port %d video stopped for >8s while audio active! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, s->recovery_attempts);
 				} else {
 					obs_log(LOG_WARNING,
