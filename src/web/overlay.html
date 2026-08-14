@@ -17,7 +17,6 @@
 
         .overlay-container {
             display: flex;
-            gap: 12px;
             width: max-content;
             transform-origin: top left;
         }
@@ -27,14 +26,13 @@
         .layout-horizontal { flex-direction: row; }
 
         .metric-card {
-            background: rgba(0, 0, 0, 0.65);
+            background: rgba(0, 0, 0, var(--bg-opacity, 0.65));
             backdrop-filter: blur(8px);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 12px;
             padding: 10px 16px;
             display: flex;
             align-items: center;
-            gap: 12px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.5);
             transition: all 0.3s ease;
         }
@@ -44,6 +42,7 @@
             opacity: 0.8;
             width: 24px;
             text-align: center;
+            margin-right: 12px;
         }
 
         .metric-content {
@@ -63,6 +62,35 @@
             font-size: 1.1rem;
             font-weight: 800;
             text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+            white-space: nowrap;
+        }
+
+        /* Condensed Mode Overrides */
+        .overlay-container.condensed {
+            background: rgba(0, 0, 0, var(--bg-opacity, 0.65));
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            padding: 4px 8px;
+            gap: 0 !important;
+        }
+
+        .overlay-container.condensed .metric-card {
+            background: transparent;
+            backdrop-filter: none;
+            border: none;
+            box-shadow: none;
+            border-radius: 0;
+            padding: 6px 12px;
+        }
+        
+        .overlay-container.condensed.layout-horizontal .metric-card:not(:last-child) {
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .overlay-container.condensed.layout-vertical .metric-card:not(:last-child) {
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
 
         /* Status Colors */
@@ -73,7 +101,7 @@
         /* Hide elements based on URL params */
         .hidden { display: none !important; }
         .hide-labels .metric-label { display: none !important; }
-        .hide-icons .metric-icon { display: none !important; }
+        .hide-icons .metric-icon { display: none !important; margin-right: 0; }
     </style>
 </head>
 <body>
@@ -91,7 +119,7 @@
             <div class="metric-icon">⚡</div>
             <div class="metric-content">
                 <div class="metric-label">Bitrate</div>
-                <div id="val-kbps" class="metric-value">0 kbps</div>
+                <div id="val-kbps" class="metric-value">0.0 Mbps</div>
             </div>
         </div>
 
@@ -140,9 +168,25 @@
         container.classList.remove('layout-vertical', 'layout-horizontal');
         container.classList.add(`layout-${layout}`);
 
+        if (params.get('condensed') === 'on') {
+            container.classList.add('condensed');
+        }
+
         const scale = params.get('scale');
         if (scale) {
             container.style.transform = `scale(${scale})`;
+        }
+
+        const spacing = params.get('spacing');
+        if (spacing) {
+            container.style.gap = `${spacing}px`;
+        } else {
+            container.style.gap = `12px`;
+        }
+
+        const opacity = params.get('opacity');
+        if (opacity) {
+            document.documentElement.style.setProperty('--bg-opacity', opacity);
         }
 
         const order = params.get('order');
@@ -155,6 +199,9 @@
                 }
             });
         }
+
+        let previousBytes = {};
+        let lastTime = 0;
 
         // Function to fetch and update stats
         async function updateStats() {
@@ -180,12 +227,41 @@
                 if (resStats.ok) {
                     const data = await resStats.json();
                     let totalKbps = 0;
-                    if (data.groups) {
+                    
+                    const now = performance.now();
+                    const deltaS = lastTime > 0 ? (now - lastTime) / 1000.0 : 0;
+                    
+                    if (data.groups && data.groups.length > 0) {
                         data.groups.forEach(g => {
-                            if(g.bitrate_kbps) totalKbps += g.bitrate_kbps;
+                            if (g.conns) {
+                                g.conns.forEach(c => {
+                                    const connId = `${g.id}_${c.ip}:${c.port}`;
+                                    const cBytes = c.bytes || 0;
+                                    let cPrevBytes = previousBytes[connId] !== undefined ? previousBytes[connId] : cBytes;
+                                    
+                                    if (cBytes < cPrevBytes) {
+                                        cPrevBytes = cBytes;
+                                    }
+                                    
+                                    previousBytes[connId] = cBytes;
+                                    
+                                    if (deltaS > 0) {
+                                        const cKbps = ((cBytes - cPrevBytes) * 8.0) / 1000.0 / deltaS;
+                                        totalKbps += cKbps;
+                                    }
+                                });
+                            }
                         });
+                    } else {
+                        previousBytes = {};
+                        totalKbps = 0;
                     }
-                    document.getElementById('val-kbps').textContent = `${Math.round(totalKbps)} kbps`;
+
+                    if (lastTime > 0) {
+                        const mbps = totalKbps / 1000.0;
+                        document.getElementById('val-kbps').textContent = `${mbps.toFixed(1)} Mbps`;
+                    }
+                    lastTime = now;
                 }
 
                 // Fetch Receivers (Audio Drift, Audio DB)
@@ -193,7 +269,6 @@
                 if (resReceivers.ok) {
                     const data = await resReceivers.json();
                     if (data && data.length > 0) {
-                        // Assuming the first running receiver is the main one
                         const activeReceiver = data.find(r => r.running) || data[0];
                         
                         const drift = activeReceiver.audio_drift_ms || 0;
@@ -217,7 +292,6 @@
             }
         }
 
-        // Poll every 1 second
         setInterval(updateStats, 1000);
         updateStats();
     </script>

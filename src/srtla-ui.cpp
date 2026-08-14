@@ -214,6 +214,7 @@ void SrtlaStatusWidget::updateStatus()
 				bool running = rObj["running"].toVariant().toBool();
 				QString protocol = rObj.contains("protocol") ? rObj["protocol"].toString().toUpper() : "SRTLA";
 				long long drift_ms = rObj.contains("audio_drift_ms") ? (long long)rObj["audio_drift_ms"].toDouble() : 0;
+				int resets = rObj.contains("auto_reset_count") ? rObj["auto_reset_count"].toInt() : 0;
 				
 				currentReceiverNames.insert(name);
 
@@ -285,7 +286,10 @@ void SrtlaStatusWidget::updateStatus()
 				if (statusItem) {
 					QString statusText = running ? "Running" : "Stopped";
 					if (running) {
-						statusText += QString(" (Drift: %1ms)").arg(drift_ms);
+						if (protocol == "SRTLA")
+							statusText += QString(" (Drift: %1ms, Resets: %2)").arg(drift_ms).arg(resets);
+						else
+							statusText += QString(" (Resets: %1)").arg(resets);
 					}
 					statusItem->setText(statusText);
 					statusItem->setForeground(running ? QBrush(QColor("#4CAF50")) : QBrush(QColor("gray")));

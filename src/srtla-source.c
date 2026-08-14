@@ -68,9 +68,9 @@ struct srtla_source {
 	double current_stream_hz;
 	uint64_t ts_window_start;
 	uint64_t frames_in_window;
-	bool needs_reload;
 	int64_t current_audio_drift;
 	float current_audio_db;
+	int auto_reset_count;
 
 	struct srtla_source *next;
 };
@@ -584,6 +584,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 
 		if (thread_restart_needed || media_restart_needed) {
 			srtla_stop_thread(context);
+			context->auto_reset_count = 0;
 
 			context->protocol = new_proto;
 			context->rist_profile = (int)obs_data_get_int(settings, "rist_profile");
@@ -931,6 +932,7 @@ void srtla_auto_recover_hung_sources()
 			// Only attempt auto-recovery up to 2 times to avoid looping on video-only or mic-less streams
 			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved || video_dropped)) {
 				s->recovery_attempts++;
+				s->auto_reset_count++;
 				s->last_recovery_time = now;
 				s->starved_since = 0;
 
@@ -1019,12 +1021,13 @@ void srtla_get_all_receivers_json(char *out_buffer, int max_len)
 			first = false;
 			const char *name = obs_source_get_name(s->source);
 			offset += snprintf(out_buffer + offset, max_len - offset,
-					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\",\"audio_drift_ms\":%lld,\"audio_db\":%.1f}",
+					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\",\"audio_drift_ms\":%lld,\"audio_db\":%.1f,\"auto_reset_count\":%d}",
 					   name ? name : "Unknown", s->listen_port,
 					   s->thread_running ? "true" : "false",
 					   s->protocol == PROTOCOL_RIST ? "rist" : "srtla",
 					   (long long)(s->current_audio_drift / 1000000LL),
-					   s->current_audio_db);
+					   s->current_audio_db,
+					   s->auto_reset_count);
 		}
 		pthread_mutex_unlock(&sources_mutex);
 		snprintf(out_buffer + offset, max_len - offset, "]");
