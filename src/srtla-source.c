@@ -170,10 +170,10 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	out.frames = audio_data->frames;
 
 	float max_peak = 1e-9f;
-	for (uint32_t c = 0; c < out.speakers; c++) {
+	for (int c = 0; c < (int)out.speakers; c++) {
 		if (out.data[c]) {
 			float *ch_data = (float *)out.data[c];
-			for (uint32_t i = 0; i < (uint32_t)out.frames; i++) {
+			for (int i = 0; i < (int)out.frames; i++) {
 				float val = fabsf(ch_data[i]);
 				if (val > max_peak) max_peak = val;
 			}

@@ -10,17 +10,21 @@
             margin: 0;
             padding: 20px;
             font-family: 'Inter', sans-serif;
-            background: transparent; /* Must be transparent for OBS Browser Source */
+            background: transparent;
             color: white;
             overflow: hidden;
         }
 
         .overlay-container {
             display: flex;
-            flex-direction: column;
             gap: 12px;
             width: max-content;
+            transform-origin: top left;
         }
+
+        /* Layouts */
+        .layout-vertical { flex-direction: column; }
+        .layout-horizontal { flex-direction: row; }
 
         .metric-card {
             background: rgba(0, 0, 0, 0.65);
@@ -68,11 +72,13 @@
 
         /* Hide elements based on URL params */
         .hidden { display: none !important; }
+        .hide-labels .metric-label { display: none !important; }
+        .hide-icons .metric-icon { display: none !important; }
     </style>
 </head>
 <body>
 
-    <div class="overlay-container">
+    <div id="overlay-container" class="overlay-container layout-vertical">
         <div id="card-status" class="metric-card">
             <div class="metric-icon">📡</div>
             <div class="metric-content">
@@ -116,14 +122,39 @@
 
     <script>
         const params = new URLSearchParams(window.location.search);
+        const container = document.getElementById('overlay-container');
         
-        // Visibility logic based on URL args (?kbps=off&scene=off)
+        // Visibility toggles
         const toggles = ['kbps', 'scene', 'sync', 'status', 'db'];
         toggles.forEach(t => {
             if (params.get(t) === 'off') {
                 document.getElementById(`card-${t}`).classList.add('hidden');
             }
         });
+
+        // Config Options
+        if (params.get('labels') === 'off') container.classList.add('hide-labels');
+        if (params.get('icons') === 'off') container.classList.add('hide-icons');
+        
+        const layout = params.get('layout') || 'vertical';
+        container.classList.remove('layout-vertical', 'layout-horizontal');
+        container.classList.add(`layout-${layout}`);
+
+        const scale = params.get('scale');
+        if (scale) {
+            container.style.transform = `scale(${scale})`;
+        }
+
+        const order = params.get('order');
+        if (order) {
+            const orderArr = order.split(',');
+            orderArr.forEach((id, index) => {
+                const card = document.getElementById(`card-${id}`);
+                if (card) {
+                    card.style.order = index;
+                }
+            });
+        }
 
         // Function to fetch and update stats
         async function updateStats() {
@@ -169,9 +200,9 @@
                         const syncEl = document.getElementById('val-sync');
                         syncEl.textContent = `${drift} ms`;
                         if (Math.abs(drift) > 100) {
-                            syncEl.style.color = '#F44336'; // Red if high drift
+                            syncEl.style.color = '#F44336';
                         } else if (Math.abs(drift) > 50) {
-                            syncEl.style.color = '#FFC107'; // Yellow if med drift
+                            syncEl.style.color = '#FFC107';
                         } else {
                             syncEl.style.color = 'white';
                         }

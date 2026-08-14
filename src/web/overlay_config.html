@@ -29,6 +29,9 @@
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
         }
 
         .preview {
@@ -38,21 +41,68 @@
             gap: 10px;
         }
 
-        .checkbox-group {
-            margin-bottom: 15px;
+        .section-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+            margin-top: 10px;
         }
 
-        .checkbox-group label {
+        .setting-row {
             display: flex;
             align-items: center;
             gap: 10px;
-            cursor: pointer;
-            font-size: 1.1rem;
+            margin-bottom: 10px;
+        }
+
+        .setting-row label {
+            flex: 1;
+        }
+        
+        select, input[type="number"], input[type="range"] {
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 5px;
+            border-radius: 4px;
+        }
+
+        /* Drag and drop list */
+        .sortable-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .sortable-item {
+            background: #3a3a3a;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: grab;
+            border: 1px solid #555;
+            user-select: none;
+        }
+        
+        .sortable-item:active {
+            cursor: grabbing;
+        }
+
+        .drag-handle {
+            color: #888;
+            cursor: grab;
+            font-size: 1.2rem;
         }
 
         input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
         }
 
         .url-box {
@@ -71,7 +121,6 @@
             height: 600px;
             border: 2px dashed #444;
             background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAOklEQVQYV2NkYGAwYkAD////Z4TRMIIApgFkRSADcIphGkE02TRj1YxLM7Ji0gO4XEK2k80fDAwMAP8pLxf78rKTAAAAAElFTkSuQmCC');
-            /* Checkerboard background for transparent iframe preview */
         }
     </style>
 </head>
@@ -80,27 +129,71 @@
     <div class="container">
         <div class="controls">
             <h1>Overlay Configurator</h1>
-            <p>Select which metrics you want to display on your stream overlay.</p>
             
-            <div class="checkbox-group">
-                <label><input type="checkbox" id="chk-status" checked onchange="updatePreview()"> Live Status</label>
-            </div>
-            <div class="checkbox-group">
-                <label><input type="checkbox" id="chk-kbps" checked onchange="updatePreview()"> Bitrate (kbps)</label>
-            </div>
-            <div class="checkbox-group">
-                <label><input type="checkbox" id="chk-scene" checked onchange="updatePreview()"> Current Scene</label>
-            </div>
-            <div class="checkbox-group">
-                <label><input type="checkbox" id="chk-sync" checked onchange="updatePreview()"> Audio Drift</label>
-            </div>
-            <div class="checkbox-group">
-                <label><input type="checkbox" id="chk-db" checked onchange="updatePreview()"> Audio DB Level</label>
+            <div>
+                <div class="section-title">Metrics (Drag to reorder)</div>
+                <ul class="sortable-list" id="metrics-list">
+                    <li class="sortable-item" data-id="status" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-status" checked onchange="updatePreview()">
+                        <label for="chk-status" style="cursor:pointer;flex:1;">Live Status</label>
+                    </li>
+                    <li class="sortable-item" data-id="kbps" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-kbps" checked onchange="updatePreview()">
+                        <label for="chk-kbps" style="cursor:pointer;flex:1;">Bitrate (kbps)</label>
+                    </li>
+                    <li class="sortable-item" data-id="scene" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-scene" checked onchange="updatePreview()">
+                        <label for="chk-scene" style="cursor:pointer;flex:1;">Current Scene</label>
+                    </li>
+                    <li class="sortable-item" data-id="sync" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-sync" checked onchange="updatePreview()">
+                        <label for="chk-sync" style="cursor:pointer;flex:1;">Audio Drift</label>
+                    </li>
+                    <li class="sortable-item" data-id="db" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-db" checked onchange="updatePreview()">
+                        <label for="chk-db" style="cursor:pointer;flex:1;">Audio DB Level</label>
+                    </li>
+                </ul>
             </div>
 
-            <h3 style="margin-top: 40px;">Browser Source URL</h3>
-            <p>Copy this URL into an OBS Browser Source:</p>
-            <div class="url-box" id="url-box"></div>
+            <div>
+                <div class="section-title">Appearance</div>
+                
+                <div class="setting-row">
+                    <label for="sel-layout">Layout</label>
+                    <select id="sel-layout" onchange="updatePreview()">
+                        <option value="vertical">Vertical</option>
+                        <option value="horizontal">Horizontal</option>
+                    </select>
+                </div>
+
+                <div class="setting-row">
+                    <label for="inp-scale">Scale / Font Size</label>
+                    <input type="number" id="inp-scale" value="1.0" step="0.1" min="0.5" max="3.0" onchange="updatePreview()" style="width: 60px;">
+                </div>
+                
+                <div class="setting-row" style="margin-top: 15px;">
+                    <label style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="chk-labels" checked onchange="updatePreview()"> Show Labels
+                    </label>
+                </div>
+                
+                <div class="setting-row">
+                    <label style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="chk-icons" checked onchange="updatePreview()"> Show Icons
+                    </label>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <div class="section-title">Browser Source URL</div>
+                <div class="url-box" id="url-box"></div>
+            </div>
         </div>
 
         <div class="preview">
@@ -114,17 +207,81 @@
             const baseUrl = window.location.origin + "/overlay";
             const params = new URLSearchParams();
 
-            const fields = ['status', 'kbps', 'scene', 'sync', 'db'];
-            fields.forEach(f => {
-                if (!document.getElementById(`chk-${f}`).checked) {
-                    params.append(f, 'off');
+            // Visibility
+            const items = document.querySelectorAll('.sortable-item');
+            const orderArr = [];
+            items.forEach(item => {
+                const id = item.getAttribute('data-id');
+                orderArr.push(id);
+                if (!document.getElementById(`chk-${id}`).checked) {
+                    params.append(id, 'off');
                 }
             });
+
+            // Order
+            params.append('order', orderArr.join(','));
+
+            // Appearance
+            const layout = document.getElementById('sel-layout').value;
+            if (layout !== 'vertical') params.append('layout', layout);
+
+            const scale = document.getElementById('inp-scale').value;
+            if (scale !== "1.0" && scale !== "1") params.append('scale', scale);
+
+            if (!document.getElementById('chk-labels').checked) params.append('labels', 'off');
+            if (!document.getElementById('chk-icons').checked) params.append('icons', 'off');
 
             const finalUrl = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
             
             document.getElementById('url-box').textContent = finalUrl;
             document.getElementById('preview-frame').src = `/overlay${params.toString() ? '?' + params.toString() : ''}`;
+        }
+
+        // Drag and Drop Logic
+        const list = document.getElementById('metrics-list');
+        let draggedItem = null;
+
+        list.addEventListener('dragstart', (e) => {
+            draggedItem = e.target.closest('li');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', draggedItem.innerHTML);
+            setTimeout(() => { draggedItem.style.opacity = '0.5'; }, 0);
+        });
+
+        list.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(list, e.clientY);
+            const currentItem = e.target.closest('li');
+            
+            if (draggedItem && currentItem && draggedItem !== currentItem) {
+                if (afterElement == null) {
+                    list.appendChild(draggedItem);
+                } else {
+                    list.insertBefore(draggedItem, afterElement);
+                }
+            }
+        });
+
+        list.addEventListener('dragend', () => {
+            if (draggedItem) {
+                draggedItem.style.opacity = '1';
+                draggedItem = null;
+                updatePreview();
+            }
+        });
+
+        function getDragAfterElement(container, y) {
+            const draggableElements = [...container.querySelectorAll('.sortable-item:not([style*="opacity: 0.5"])')];
+
+            return draggableElements.reduce((closest, child) => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+                if (offset < 0 && offset > closest.offset) {
+                    return { offset: offset, element: child };
+                } else {
+                    return closest;
+                }
+            }, { offset: Number.NEGATIVE_INFINITY }).element;
         }
 
         // Initialize
