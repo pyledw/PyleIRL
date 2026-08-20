@@ -215,6 +215,7 @@ void SrtlaStatusWidget::updateStatus()
 				QString protocol = rObj.contains("protocol") ? rObj["protocol"].toString().toUpper() : "SRTLA";
 				long long drift_ms = rObj.contains("audio_drift_ms") ? (long long)rObj["audio_drift_ms"].toDouble() : 0;
 				int resets = rObj.contains("auto_reset_count") ? rObj["auto_reset_count"].toInt() : 0;
+				bool audio_starved = rObj.contains("audio_starved") && rObj["audio_starved"].toVariant().toBool();
 				
 				currentReceiverNames.insert(name);
 
@@ -286,13 +287,24 @@ void SrtlaStatusWidget::updateStatus()
 				if (statusItem) {
 					QString statusText = running ? "Running" : "Stopped";
 					if (running) {
-						if (protocol == "SRTLA")
-							statusText += QString(" (Drift: %1ms, Resets: %2)").arg(drift_ms).arg(resets);
-						else
-							statusText += QString(" (Resets: %1)").arg(resets);
+						statusText += QString(" (Drift: %1ms, Resets: %2)").arg(drift_ms).arg(resets);
+						if (audio_starved || std::abs(drift_ms) > 500) {
+							statusText += " [⚠️ BAD AUDIO]";
+						}
 					}
 					statusItem->setText(statusText);
-					statusItem->setForeground(running ? QBrush(QColor("#4CAF50")) : QBrush(QColor("gray")));
+					
+					if (running) {
+						if (audio_starved || std::abs(drift_ms) > 500) {
+							statusItem->setForeground(QBrush(QColor("#F44336"))); // Red
+						} else if (std::abs(drift_ms) > 100) {
+							statusItem->setForeground(QBrush(QColor("#FFC107"))); // Yellow
+						} else {
+							statusItem->setForeground(QBrush(QColor("#4CAF50"))); // Green
+						}
+					} else {
+						statusItem->setForeground(QBrush(QColor("gray")));
+					}
 				}
 
 				QWidget *actionWidget = receiversTable->cellWidget(foundRow, 2);
