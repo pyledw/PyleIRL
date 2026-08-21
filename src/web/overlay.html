@@ -295,35 +295,30 @@
                         const syncEl = document.getElementById('val-sync');
                         const syncCard = document.getElementById('card-sync');
                         
-                        if (isAudioStarved || Math.abs(drift) > 500) {
-                            syncEl.innerHTML = `${drift} ms <span class="warning-badge" style="font-size: 14px; padding: 4px 8px;">⚠️ BAD AUDIO</span>`;
-                            syncEl.style.color = '#F44336';
-                            if (syncCard) {
-                                syncCard.style.backgroundColor = 'rgba(244, 67, 54, 0.4)';
-                                syncCard.style.borderColor = '#F44336';
-                            }
-                        } else if (Math.abs(drift) > 100) {
-                            syncEl.innerHTML = `${drift} ms <span class="warning-badge">OUT OF SYNC</span>`;
-                            syncEl.style.color = '#FFC107';
-                            if (syncCard) {
-                                syncCard.style.backgroundColor = '';
-                                syncCard.style.borderColor = '';
+                        if (isAudioStarved || Math.abs(drift) > 1000) {
+                            if (syncCard) syncCard.style.display = 'flex';
+                            if (isAudioStarved || Math.abs(drift) > 5000) {
+                                syncEl.innerHTML = `${drift} ms <span class="warning-badge" style="font-size: 14px; padding: 4px 8px;">⚠️ BAD AUDIO</span>`;
+                                syncEl.style.color = '#F44336';
+                                if (syncCard) {
+                                    syncCard.style.backgroundColor = 'rgba(244, 67, 54, 0.4)';
+                                    syncCard.style.borderColor = '#F44336';
+                                }
+                            } else {
+                                syncEl.innerHTML = `${drift} ms <span class="warning-badge">OUT OF SYNC</span>`;
+                                syncEl.style.color = '#FFC107';
+                                if (syncCard) {
+                                    syncCard.style.backgroundColor = '';
+                                    syncCard.style.borderColor = '';
+                                }
                             }
                         } else {
-                            syncEl.textContent = `${drift} ms`;
-                            if (syncCard) {
-                                syncCard.style.backgroundColor = '';
-                                syncCard.style.borderColor = '';
-                            }
-                            if (Math.abs(drift) > 50) {
-                                syncEl.style.color = '#FFC107';
-                            } else {
-                                syncEl.style.color = 'white';
-                            }
+                            if (syncCard) syncCard.style.display = 'none';
                         }
 
                         const db = activeReceiver.audio_db !== undefined ? activeReceiver.audio_db : -100.0;
-                        document.getElementById('val-db').textContent = `${db.toFixed(1)} dB`;
+                        let audioLevel = Math.max(0, Math.min(100, (db + 60) * (100 / 60)));
+                        document.getElementById('val-db').textContent = `${Math.round(audioLevel)}`;
                     }
                 }
 

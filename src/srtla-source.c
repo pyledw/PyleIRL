@@ -42,6 +42,7 @@ struct srtla_source {
 	int local_srt_port;
 	char *listen_ip;
 	int latency;
+	char *playback_engine;
 
 	int rist_profile;
 	int rist_buffer_ms;
@@ -80,6 +81,27 @@ struct srtla_source {
 static struct srtla_source *sources_head = NULL;
 static pthread_mutex_t sources_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static bool srtla_is_audio_starved_locked(struct srtla_source *curr) {
+	if (!curr) return false;
+	int groups = 0;
+	if (curr->protocol == PROTOCOL_RIST) {
+		groups = rist_get_peer_count_by_port(curr->listen_port);
+	} else {
+		groups = srtla_get_group_count_by_port(curr->listen_port);
+	}
+	if (groups > 0) {
+		uint64_t now = os_gettime_ns();
+		// Only flag starved if video is active (received in the last 2s) and:
+		if (curr->last_video_time > 0 && (now - curr->last_video_time < 2000000000ULL)) {
+			// Audio severely starved (< 30kHz) continuously for >= 6s
+			if (curr->starved_since > 0 && (now - curr->starved_since >= 6000000000ULL)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -89,31 +111,7 @@ bool srtla_is_audio_starved(int listen_port) {
 	bool starved = false;
 	while (curr) {
 		if (curr->listen_port == listen_port) {
-			int groups = 0;
-			if (curr->protocol == PROTOCOL_RIST) {
-				groups = rist_get_peer_count_by_port(curr->listen_port);
-			} else {
-				groups = srtla_get_group_count_by_port(curr->listen_port);
-			}
-			if (groups > 0) {
-				uint64_t now = os_gettime_ns();
-				// Only flag starved if video is active (received in the last 2s) and:
-				// 1. connection is >12s old with zero audio ever received, or
-				// 2. audio was active and completely stopped for >= 8s, or
-				// 3. audio is severely degraded (< 30kHz).
-				bool active_video = (curr->last_video_time > 0 && (now - curr->last_video_time < 2000000000ULL));
-				if (active_video) {
-					if (curr->last_audio_time == 0) {
-						if (curr->connected_since > 0 && (now - curr->connected_since >= 12000000000ULL)) {
-							starved = true;
-						}
-					} else if (now - curr->last_audio_time >= 8000000000ULL) {
-						starved = true;
-					} else if (curr->current_stream_hz > 0 && curr->current_stream_hz < 30000.0) {
-						starved = true;
-					}
-				}
-			}
+			starved = srtla_is_audio_starved_locked(curr);
 			break;
 		}
 		curr = curr->next;
@@ -195,25 +193,34 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	uint64_t sample_rate = (out.samples_per_sec > 0) ? (uint64_t)out.samples_per_sec : 48000ULL;
 	uint64_t frame_duration_ns = ((uint64_t)out.frames * 1000000000ULL) / sample_rate;
 
-	if (context->last_audio_ts == 0) {
+	bool is_proxy_engine = context->playback_engine && 
+		(strcmp(context->playback_engine, "vlc") == 0 || strcmp(context->playback_engine, "irl_source") == 0);
+
+	if (is_proxy_engine) {
 		context->last_audio_ts = audio_data->timestamp;
 		context->last_original_ts = audio_data->timestamp;
+		context->current_audio_drift = 0;
 	} else {
-		uint64_t expected_ts = context->last_audio_ts + frame_duration_ns;
-		int64_t drift = (int64_t)audio_data->timestamp - (int64_t)expected_ts;
-		context->current_audio_drift = drift;
-		
-		// If drift is within +/-50ms, gently nudge towards source clock without causing pitch or audio drop glitches
-		if (drift > -50000000LL && drift < 50000000LL) {
-			expected_ts += (drift / 32);
+		if (context->last_audio_ts == 0) {
+			context->last_audio_ts = audio_data->timestamp;
+			context->last_original_ts = audio_data->timestamp;
 		} else {
-			if (drift > 1000000000LL || drift < -1000000000LL) {
-				obs_log(LOG_INFO, "[SRTLA] Massive PTS discontinuity detected (drift: %.2f sec). Resyncing...", (double)drift / 1000000000.0);
+			uint64_t expected_ts = context->last_audio_ts + frame_duration_ns;
+			int64_t drift = (int64_t)audio_data->timestamp - (int64_t)expected_ts;
+			context->current_audio_drift = drift;
+			
+			// If drift is within +/-50ms, gently nudge towards source clock without causing pitch or audio drop glitches
+			if (drift > -50000000LL && drift < 50000000LL) {
+				expected_ts += (drift / 32);
+			} else {
+				if (drift > 1000000000LL || drift < -1000000000LL) {
+					obs_log(LOG_INFO, "[SRTLA] Massive PTS discontinuity detected (drift: %.2f sec). Resyncing...", (double)drift / 1000000000.0);
+				}
+				// Large PTS discontinuity / resync (e.g. stream reconnect): jump directly to new timestamp
+				expected_ts = audio_data->timestamp;
 			}
-			// Large PTS discontinuity / resync (e.g. stream reconnect): jump directly to new timestamp
-			expected_ts = audio_data->timestamp;
+			context->last_audio_ts = expected_ts;
 		}
-		context->last_audio_ts = expected_ts;
 	}
 	out.timestamp = context->last_audio_ts;
 
@@ -262,7 +269,9 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 		last_log_time = now;
 	}
 
-	obs_source_output_audio(context->source, &out);
+	if (!is_proxy_engine) {
+		obs_source_output_audio(context->source, &out);
+	}
 }
 
 static void *srtla_source_create(obs_data_t *settings, obs_source_t *source)
@@ -328,8 +337,68 @@ static void srtla_create_media_source(struct srtla_source *context)
 	const char *parent_name = obs_source_get_name(context->source);
 	snprintf(source_name, sizeof(source_name), "%s_Internal", parent_name ? parent_name : "SRTLA");
 
-	obs_data_t *media_settings = obs_data_create();
-	obs_data_set_string(media_settings, "input", url);
+	bool use_vlc = (context->playback_engine && strcmp(context->playback_engine, "vlc") == 0);
+	bool use_irl_source = (context->playback_engine && strcmp(context->playback_engine, "irl_source") == 0);
+
+	if (use_irl_source) {
+		obs_data_t *irl_settings = obs_data_create();
+		obs_data_set_string(irl_settings, "url", url);
+		obs_data_set_int(irl_settings, "reconnect_delay", 1);
+		obs_data_set_bool(irl_settings, "low_latency_audio", true);
+		obs_data_set_bool(irl_settings, "hw_decode", true);
+		obs_data_set_string(irl_settings, "ffmpeg_options",
+				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000");
+
+		context->media_source = obs_source_create_private("irl_source", source_name, irl_settings);
+		obs_data_release(irl_settings);
+
+		if (!context->media_source) {
+			obs_log(LOG_WARNING, "[SRTLA] IRL Source creation failed (is obs-irl-source plugin installed?). Falling back to FFmpeg.");
+			use_irl_source = false;
+		} else {
+			obs_log(LOG_INFO, "[SRTLA] Created internal irl_source successfully (Perfect A/V Sync)");
+		}
+	} else if (use_vlc) {
+		obs_data_t *vlc_settings = obs_data_create();
+		obs_data_array_t *playlist = obs_data_array_create();
+		obs_data_t *item = obs_data_create();
+		
+		char vlc_url[256];
+		if (context->protocol == PROTOCOL_RIST) {
+			snprintf(vlc_url, sizeof(vlc_url), "udp://@127.0.0.1:%d", context->local_srt_port);
+		} else {
+			strncpy(vlc_url, url, sizeof(vlc_url));
+		}
+		
+		obs_data_set_string(item, "value", vlc_url);
+		obs_data_array_push_back(playlist, item);
+		obs_data_release(item);
+
+		obs_data_set_array(vlc_settings, "playlist", playlist);
+		obs_data_array_release(playlist);
+
+		obs_data_set_bool(vlc_settings, "loop", false);
+		obs_data_set_bool(vlc_settings, "shuffle", false);
+		obs_data_set_string(vlc_settings, "playback_behavior", "always_play");
+		obs_data_set_int(vlc_settings, "network_caching", 0);
+		obs_data_set_int(vlc_settings, "track", 1);
+		obs_data_set_int(vlc_settings, "subtitle_track", 1);
+		obs_data_set_bool(vlc_settings, "subtitle_enable", false);
+
+		context->media_source = obs_source_create_private("vlc_source", source_name, vlc_settings);
+		obs_data_release(vlc_settings);
+
+		if (!context->media_source) {
+			obs_log(LOG_WARNING, "[SRTLA] VLC Video Source creation failed (is 64-bit VLC installed?). Falling back to FFmpeg.");
+			use_vlc = false;
+		} else {
+			obs_log(LOG_INFO, "[SRTLA] Created internal vlc_source successfully (low-latency network caching 0ms)");
+		}
+	}
+
+	if (!use_vlc && !use_irl_source) {
+		obs_data_t *media_settings = obs_data_create();
+		obs_data_set_string(media_settings, "input", url);
 		obs_data_set_bool(media_settings, "is_local_file", false);
 		obs_data_set_bool(media_settings, "hw_decode", true);
 		obs_data_set_bool(media_settings, "clear_on_media_end", false);
@@ -348,12 +417,17 @@ static void srtla_create_media_source(struct srtla_source *context)
 		} else {
 			obs_log(LOG_ERROR, "[SRTLA] Failed to create internal ffmpeg_source");
 		}
+	}
 
 	if (context->media_source) {
-		obs_source_set_async_decoupled(context->media_source, true);
-		obs_source_set_async_unbuffered(context->media_source, true);
-		obs_source_set_audio_mixers(context->media_source, 0);
-		obs_source_set_async_decoupled(context->source, true);
+		if (!use_vlc && !use_irl_source) {
+			obs_source_set_async_decoupled(context->media_source, true);
+			obs_source_set_async_unbuffered(context->media_source, true);
+			obs_source_set_async_decoupled(context->source, true);
+			obs_source_set_audio_mixers(context->media_source, 0);
+		}
+
+		// Always capture audio for DB meter calculations
 		obs_source_add_audio_capture_callback(context->media_source, srtla_audio_capture_cb, context);
 
 		// Keep media source permanently active in background so stream continues receiving across scenes
@@ -399,6 +473,7 @@ static void srtla_source_destroy(void *data)
 	}
 	pthread_mutex_unlock(&sources_mutex);
 
+	bfree(context->playback_engine);
 	bfree(context->listen_ip);
 	bfree(context->rist_passphrase);
 	bfree(context);
@@ -525,6 +600,14 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			listen_ip_changed = true;
 		}
 
+		const char *new_engine = obs_data_get_string(settings, "playback_engine");
+		if (!new_engine || !*new_engine) new_engine = "ffmpeg"; // Default to ffmpeg
+		bool engine_changed = (!context->playback_engine || strcmp(context->playback_engine, new_engine) != 0);
+		if (engine_changed) {
+			bfree(context->playback_engine);
+			context->playback_engine = bstrdup(new_engine);
+		}
+
 		const char *new_passphrase = obs_data_get_string(settings, "rist_passphrase");
 		bool config_changed = false;
 		if (context->protocol != new_proto) config_changed = true;
@@ -535,7 +618,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		if (new_passphrase && (!context->rist_passphrase || strcmp(context->rist_passphrase, new_passphrase) != 0)) config_changed = true;
 		else if (!new_passphrase && context->rist_passphrase) config_changed = true;
 
-		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || context->protocol != new_proto);
+		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || engine_changed || context->protocol != new_proto);
 		bool thread_restart_needed = (context->listen_port != new_listen_port ||
 					      context->local_srt_port != new_local_srt_port || listen_ip_changed || config_changed ||
 					      !context->thread_running);
@@ -662,6 +745,11 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 	obs_property_list_add_string(proto_list, "RIST (Reliable Internet Stream Transport)", "rist");
 	obs_property_set_modified_callback(proto_list, protocol_changed);
 
+	obs_property_t *engine_list = obs_properties_add_list(props, "playback_engine", "Playback Engine", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(engine_list, "IRL Source (Perfect Sync - Recommended)", "irl_source");
+	obs_property_list_add_string(engine_list, "VLC (VLC Video Source)", "vlc");
+	obs_property_list_add_string(engine_list, "FFmpeg (Built-in Media Source)", "ffmpeg");
+
 	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
 	obs_properties_add_int(props, "listen_port", "SRTLA Listen Port (UDP)", 1, 65535, 1);
 	obs_properties_add_int(props, "latency", "SRTLA Latency (ms)", 0, 30000, 100);
@@ -688,6 +776,7 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 static void srtla_source_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_string(settings, "protocol", "srtla");
+	obs_data_set_default_string(settings, "playback_engine", "ffmpeg");
 	obs_data_set_default_string(settings, "listen_ip", "");
 	obs_data_set_default_int(settings, "listen_port", 5000);
 	obs_data_set_default_int(settings, "local_srt_port", 4000);
@@ -711,13 +800,44 @@ static void srtla_source_video_tick(void *data, float seconds)
 			context->needs_reload = false;
 			srtla_reload_media_source(context);
 		}
+
+		bool is_proxy_engine = context->playback_engine && 
+			(strcmp(context->playback_engine, "vlc") == 0 || strcmp(context->playback_engine, "irl_source") == 0);
+
+		if (is_proxy_engine && context->media_source) {
+			// Mirror audio settings from srtla_source (the proxy) down to the internal vlc_source
+			float vol = obs_source_get_volume(context->source);
+			if (obs_source_get_volume(context->media_source) != vol) {
+				obs_source_set_volume(context->media_source, vol);
+			}
+
+			bool muted = obs_source_muted(context->source);
+			if (obs_source_muted(context->media_source) != muted) {
+				obs_source_set_muted(context->media_source, muted);
+			}
+
+			uint32_t mixers = obs_source_get_audio_mixers(context->source);
+			if (obs_source_get_audio_mixers(context->media_source) != mixers) {
+				obs_source_set_audio_mixers(context->media_source, mixers);
+			}
+
+			int64_t sync_offset = obs_source_get_sync_offset(context->source);
+			if (obs_source_get_sync_offset(context->media_source) != sync_offset) {
+				obs_source_set_sync_offset(context->media_source, sync_offset);
+			}
+			
+			float balance = obs_source_get_balance_value(context->source);
+			if (obs_source_get_balance_value(context->media_source) != balance) {
+				obs_source_set_balance_value(context->media_source, balance);
+			}
+		}
 	}
 }
 
 struct obs_source_info srtla_source_info = {
 	.id = "srtla_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
-	.output_flags = OBS_SOURCE_ASYNC_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_CUSTOM_DRAW |
+	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_CUSTOM_DRAW |
 			OBS_SOURCE_DO_NOT_DUPLICATE,
 	.get_name = srtla_source_get_name,
 	.create = srtla_source_create,
@@ -990,7 +1110,7 @@ void srtla_get_all_receivers_json(char *out_buffer, int max_len)
 					   (long long)(s->current_audio_drift / 1000000LL),
 					   s->current_audio_db,
 					   s->auto_reset_count,
-					   srtla_is_audio_starved(s->listen_port) ? "true" : "false");
+					   srtla_is_audio_starved_locked(s) ? "true" : "false");
 		}
 		pthread_mutex_unlock(&sources_mutex);
 		snprintf(out_buffer + offset, max_len - offset, "]");
