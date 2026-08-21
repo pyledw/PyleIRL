@@ -294,6 +294,10 @@
                     <span class="slider"></span>
                 </label>
             </div>
+            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:15px; border-bottom:none;">
+                <label style="margin-bottom:5px; font-weight:bold;">Primary Ingestion Source (for Scene Switcher)</label>
+                <select id="setting-primary-tracker" class="rsrc" style="width:100%; box-sizing:border-box;"></select>
+            </div>
             <div class="setting-row">
                 <span>Web Interface Session</span>
                 <button class="btn-danger" onclick="logout()" style="padding:5px 10px;">Logout</button>
@@ -317,7 +321,7 @@
         <div class="panel">
             <h2>Source Visibility Rules <button style="float:right; padding:5px 10px;" onclick="addVisAutoSwitchRule()">+ Add</button></h2>
             <table id="vis-rules-table">
-                <tr><th>Min Kbps</th><th>Max Kbps</th><th>Target Source</th><th></th></tr>
+                <tr><th>Min Kbps</th><th>Max Kbps</th><th>Ingestion Source</th><th>Target Source</th><th></th></tr>
             </table>
         </div>
         <div class="panel">
@@ -1058,7 +1062,7 @@
                 sel.value = currentVal;
             });
             
-            document.querySelectorAll('.rsrc').forEach(sel => {
+            document.querySelectorAll('.rsrc, .rsrc-tracker').forEach(sel => {
                 const currentVal = sel.value || sel.getAttribute('data-val');
                 sel.innerHTML = "";
                 if (currentVal && !cachedSources.includes(currentVal)) {
@@ -1086,8 +1090,9 @@
             const visRules = JSON.parse(data.visibility_rules || "[]");
             const visTable = document.getElementById('vis-rules-table');
             while(visTable.rows.length > 1) visTable.deleteRow(1);
-            visRules.forEach(r => addVisAutoSwitchRule(r.minKbps, r.maxKbps, r.sourceName));
+            visRules.forEach(r => addVisAutoSwitchRule(r.minKbps, r.maxKbps, r.sourceName, r.trackerSource));
             
+            if (document.getElementById('setting-primary-tracker')) document.getElementById('setting-primary-tracker').setAttribute('data-val', data.primary_tracker_source || "");
             if (document.getElementById('setting-vol-autoswitch')) document.getElementById('setting-vol-autoswitch').checked = !!data.vol_enabled;
             if (document.getElementById('setting-vol-delay')) document.getElementById('setting-vol-delay').value = data.vol_delay || 2;
             const volRules = JSON.parse(data.volume_rules || "[]");
@@ -1112,12 +1117,13 @@
             updateDropdowns();
         }
 
-        function addVisAutoSwitchRule(min=0, max=0, source="") {
+        function addVisAutoSwitchRule(min=0, max=0, source="", trackerSource="") {
             const table = document.getElementById('vis-rules-table');
             const row = table.insertRow();
             row.innerHTML = `
                 <td><input type="number" value="${min}" class="rmin"></td>
                 <td><input type="number" value="${max}" class="rmax"></td>
+                <td><select class="rsrc-tracker" data-val="${trackerSource}"><option value="${trackerSource}">${trackerSource}</option></select></td>
                 <td><select class="rsrc" data-val="${source}"><option value="${source}">${source}</option></select></td>
                 <td><button class="btn-danger" onclick="this.parentElement.parentElement.remove()">X</button></td>
             `;
@@ -1158,11 +1164,12 @@
             const visRules = [];
             document.querySelectorAll('#vis-rules-table tr').forEach((row, i) => {
                 if(i === 0) return;
-                visRules.push({
-                    minKbps: parseInt(row.querySelector('.rmin').value),
-                    maxKbps: parseInt(row.querySelector('.rmax').value),
-                    sourceName: row.querySelector('.rsrc').value
-                });
+                    visRules.push({
+                        minKbps: parseInt(row.querySelector('.rmin').value),
+                        maxKbps: parseInt(row.querySelector('.rmax').value),
+                        trackerSource: row.querySelector('.rsrc-tracker').value,
+                        sourceName: row.querySelector('.rsrc').value
+                    });
             });
             
             const volRules = [];
@@ -1184,6 +1191,7 @@
                 rules: JSON.stringify(rules),
                 no_failover_scenes: JSON.stringify(noFailover),
                 visibility_rules: JSON.stringify(visRules),
+                primary_tracker_source: document.getElementById('setting-primary-tracker') ? document.getElementById('setting-primary-tracker').value : "",
                 volume_rules: JSON.stringify(volRules),
                 vol_enabled: document.getElementById('setting-vol-autoswitch') ? document.getElementById('setting-vol-autoswitch').checked : false,
                 vol_delay: document.getElementById('setting-vol-delay') ? parseInt(document.getElementById('setting-vol-delay').value) : 2

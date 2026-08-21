@@ -524,6 +524,9 @@ static void handle_api_autoswitch_get(const httplib::Request &req, httplib::Resp
 		obj["vis_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay"));
 		obj["vol_enabled"] = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
 		obj["vol_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay"));
+		
+		const char *tracker = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
+		obj["primary_tracker_source"] = tracker ? QString(tracker) : "";
 	}
 	QJsonDocument doc(obj);
 	res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
@@ -558,6 +561,8 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 		if (obj.contains("visibility_rules"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON",
 					  obj["visibility_rules"].toString().toUtf8().constData());
+		if (obj.contains("primary_tracker_source"))
+			config_set_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource", obj["primary_tracker_source"].toString().toUtf8().constData());
 		if (obj.contains("volume_rules"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON",
 					  obj["volume_rules"].toString().toUtf8().constData());
@@ -590,10 +595,10 @@ static void handle_api_receivers(const httplib::Request &req, httplib::Response 
 static void handle_api_stats(const httplib::Request &req, httplib::Response &res)
 {
 	int listen_port = 0, failed = 0;
-	char buf[4096] = {0};
+	char buf[16384] = {0};
 	srtla_get_connection_details(&listen_port, &failed, buf, sizeof(buf));
 	
-	char rist_buf[4096] = {0};
+	char rist_buf[16384] = {0};
 	rist_get_connection_details(rist_buf, sizeof(rist_buf));
 
 	QJsonDocument doc = QJsonDocument::fromJson(QByteArray(buf));
@@ -621,6 +626,25 @@ static void handle_api_stats(const httplib::Request &req, httplib::Response &res
 			ports.append(ristPorts[i]);
 		}
 		root["ports"] = ports;
+	}
+	
+	config_t *global_config = obs_frontend_get_profile_config();
+	if (global_config) {
+		const char *pts = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
+		if (pts && *pts) {
+			int pPort = 5000;
+			obs_source_t *src = obs_get_source_by_name(pts);
+			if (src) {
+				obs_data_t *settings = obs_source_get_settings(src);
+				if (settings) {
+					int p = (int)obs_data_get_int(settings, "listen_port");
+					if (p > 0) pPort = p;
+					obs_data_release(settings);
+				}
+				obs_source_release(src);
+			}
+			root["primary_tracker_port"] = pPort;
+		}
 	}
 	
 	QJsonDocument mergedDoc(root);

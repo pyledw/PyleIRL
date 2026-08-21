@@ -64,6 +64,7 @@ private:
 struct SourceVisibilityRule {
 	int minKbps;
 	int maxKbps; // 0 means unlimited
+	QString trackerSource;
 	QString sourceName;
 };
 
@@ -97,7 +98,7 @@ private slots:
 private:
 	QComboBox *enableAutoSwitch;
 	QSpinBox *switchDelay;
-	QComboBox *primarySceneBox;
+	QComboBox *primarySourceBox;
 	QComboBox *failoverSceneBox;
 	QListWidget *noFailoverList;
 
@@ -112,7 +113,7 @@ private:
 	QStringList availableScenes;
 	QStringList availableSources;
 	QStringList availableAudioSources;
-	void addVisibilityRuleRow(int minKbps, int maxKbps, const QString &sourceName);
+	void addVisibilityRuleRow(int minKbps, int maxKbps, const QString &trackerSource, const QString &sourceName);
 	void addVolumeRuleRow(const QString &audioSource, int minDb, int maxDb, const QString &targetSource);
 };
 
@@ -145,6 +146,8 @@ private:
 	QString failoverScene;
 	QVector<SourceVisibilityRule> visibilityRules;
 	QVector<VolumeVisibilityRule> volumeRules;
+
+	QString primaryTrackerSource;
 	QSet<QString> noFailoverScenes;
 	bool isCurrentlyFailover;
 	int matchDurationCounter;

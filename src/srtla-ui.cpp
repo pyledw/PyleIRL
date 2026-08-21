@@ -40,7 +40,7 @@ void srtla_force_reload_by_name(const char *name);
 void srtla_force_reload_all();
 char *srtla_get_frpc_path(void);
 bool srtla_is_audio_starved(int listen_port);
-bool srtla_is_any_media_playing();
+extern "C" bool srtla_is_media_playing(int listen_port);
 void srtla_auto_recover_hung_sources();
 
 void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
@@ -180,7 +180,7 @@ void SrtlaStatusWidget::updateStatus()
 		int connections = 0;
 		int listen_port = 0;
 		int failed_conns = 0;
-		char details_buffer[4096] = {0};
+		char details_buffer[16384] = {0};
 		char receivers_buffer[4096] = {0};
 
 		srtla_auto_recover_hung_sources();
@@ -191,7 +191,7 @@ void SrtlaStatusWidget::updateStatus()
 		bool rist_listening = false;
 		int rist_groups = 0;
 		int rist_conns = 0;
-		char rist_details_buffer[4096] = {0};
+		char rist_details_buffer[16384] = {0};
 		rist_get_connection_stats(&rist_listening, &rist_groups, &rist_conns);
 		rist_get_connection_details(rist_details_buffer, sizeof(rist_details_buffer));
 		
@@ -783,7 +783,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	switchDelay->setSuffix(" seconds");
 	switchDelay->setValue(2); // Default 2 seconds
 
-	primarySceneBox = new QComboBox();
+	primarySourceBox = new QComboBox();
 	failoverSceneBox = new QComboBox();
 
 	// Populate scenes
@@ -832,12 +832,15 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	availableAudioSources.sort();
 
 	for (const QString &sceneName : availableScenes) {
-		primarySceneBox->addItem(sceneName);
+		// primarySceneBox is gone
 		failoverSceneBox->addItem(sceneName);
 	}
 
 	sceneLayout->addRow("Enable Media Auto-Switch:", enableAutoSwitch);
-	sceneLayout->addRow("Primary (Live) Scene:", primarySceneBox);
+	for (const QString &sourceName : availableSources) {
+		primarySourceBox->addItem(sourceName);
+	}
+	sceneLayout->addRow("Primary Ingestion Source:", primarySourceBox);
 	sceneLayout->addRow("Failover (Disconnected) Scene:", failoverSceneBox);
 	sceneLayout->addRow("Switch Delay (Failover only):", switchDelay);
 
@@ -865,11 +868,11 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	visSwitchDelay->setValue(2); // Default 2 seconds
 
 	visibilityRulesTable = new QTableWidget();
-	visibilityRulesTable->setColumnCount(4);
+	visibilityRulesTable->setColumnCount(5);
 	visibilityRulesTable->setHorizontalHeaderLabels(QStringList() << "Min Kbps" << "Max Kbps (0=unlimited)"
-								      << "Source Name" << "");
+								      << "Tracker Port" << "Source Name" << "");
 	visibilityRulesTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-	visibilityRulesTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+	visibilityRulesTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
 
 	QPushButton *addVisRuleBtn = new QPushButton("Add Visibility Rule");
 	connect(addVisRuleBtn, &QPushButton::clicked, this, &SrtlaAutoSwitchDialog::addNewVisibilityRule);
@@ -935,10 +938,11 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 			switchDelay->setValue(delay);
 		}
 
-		const char *primaryStr = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryScene");
-		if (primaryStr && *primaryStr) {
-			int idx = primarySceneBox->findText(QString::fromUtf8(primaryStr));
-			if (idx >= 0) primarySceneBox->setCurrentIndex(idx);
+		const char *primaryTracker = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
+		if (primaryTracker && *primaryTracker) {
+			int idx = primarySourceBox->findText(QString::fromUtf8(primaryTracker));
+			if (idx >= 0) primarySourceBox->setCurrentIndex(idx);
+			else primarySourceBox->setCurrentText(QString::fromUtf8(primaryTracker));
 		}
 
 		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
@@ -973,6 +977,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 				for (int i = 0; i < arr.size(); i++) {
 					QJsonObject obj = arr[i].toObject();
 					addVisibilityRuleRow(obj["minKbps"].toInt(), obj["maxKbps"].toInt(),
+							     obj["trackerSource"].toString(),
 							     obj["sourceName"].toString());
 				}
 			}
@@ -994,7 +999,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 }
 
 
-void SrtlaAutoSwitchDialog::addVisibilityRuleRow(int minKbps, int maxKbps, const QString &sourceName)
+void SrtlaAutoSwitchDialog::addVisibilityRuleRow(int minKbps, int maxKbps, const QString &trackerSource, const QString &sourceName)
 {
 	int row = visibilityRulesTable->rowCount();
 	visibilityRulesTable->insertRow(row);
@@ -1009,6 +1014,16 @@ void SrtlaAutoSwitchDialog::addVisibilityRuleRow(int minKbps, int maxKbps, const
 	maxSp->setValue(maxKbps);
 	visibilityRulesTable->setCellWidget(row, 1, maxSp);
 
+	QComboBox *trackerSourceCb = new QComboBox();
+	trackerSourceCb->setEditable(true);
+	trackerSourceCb->addItems(availableSources);
+	int tIdx = trackerSourceCb->findText(trackerSource);
+	if (tIdx >= 0)
+		trackerSourceCb->setCurrentIndex(tIdx);
+	else
+		trackerSourceCb->setCurrentText(trackerSource);
+	visibilityRulesTable->setCellWidget(row, 2, trackerSourceCb);
+
 	QComboBox *sourceCb = new QComboBox();
 	sourceCb->setEditable(true);
 	sourceCb->addItems(availableSources);
@@ -1017,23 +1032,23 @@ void SrtlaAutoSwitchDialog::addVisibilityRuleRow(int minKbps, int maxKbps, const
 		sourceCb->setCurrentIndex(index);
 	else
 		sourceCb->setCurrentText(sourceName);
-	visibilityRulesTable->setCellWidget(row, 2, sourceCb);
+	visibilityRulesTable->setCellWidget(row, 3, sourceCb);
 
 	QPushButton *removeBtn = new QPushButton("Remove");
 	connect(removeBtn, &QPushButton::clicked, [this, removeBtn]() {
 		for (int i = 0; i < visibilityRulesTable->rowCount(); i++) {
-			if (visibilityRulesTable->cellWidget(i, 3) == removeBtn) {
+			if (visibilityRulesTable->cellWidget(i, 4) == removeBtn) {
 				visibilityRulesTable->removeRow(i);
 				break;
 			}
 		}
 	});
-	visibilityRulesTable->setCellWidget(row, 3, removeBtn);
+	visibilityRulesTable->setCellWidget(row, 4, removeBtn);
 }
 
 void SrtlaAutoSwitchDialog::addNewVisibilityRule()
 {
-	addVisibilityRuleRow(0, 0, "");
+	addVisibilityRuleRow(0, 0, "", "");
 }
 
 void SrtlaAutoSwitchDialog::addVolumeRuleRow(const QString &audioSource, int minDb, int maxDb,
@@ -1097,7 +1112,7 @@ void SrtlaAutoSwitchDialog::saveSettings()
 	if (global_config) {
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "Enabled", enableAutoSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "Delay", switchDelay->value());
-		config_set_string(global_config, "SRTLA_AutoSwitch", "PrimaryScene", primarySceneBox->currentText().toUtf8().constData());
+		config_set_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource", primarySourceBox->currentText().toUtf8().constData());
 		config_set_string(global_config, "SRTLA_AutoSwitch", "FailoverScene", failoverSceneBox->currentText().toUtf8().constData());
 
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled", enableVisSwitch->currentIndex() == 1);
@@ -1122,12 +1137,14 @@ void SrtlaAutoSwitchDialog::saveSettings()
 		for (int i = 0; i < visibilityRulesTable->rowCount(); i++) {
 			QSpinBox *minSp = qobject_cast<QSpinBox *>(visibilityRulesTable->cellWidget(i, 0));
 			QSpinBox *maxSp = qobject_cast<QSpinBox *>(visibilityRulesTable->cellWidget(i, 1));
-			QComboBox *sourceCb = qobject_cast<QComboBox *>(visibilityRulesTable->cellWidget(i, 2));
+			QComboBox *trackerSourceCb = qobject_cast<QComboBox *>(visibilityRulesTable->cellWidget(i, 2));
+			QComboBox *sourceCb = qobject_cast<QComboBox *>(visibilityRulesTable->cellWidget(i, 3));
 
-			if (minSp && maxSp && sourceCb) {
+			if (minSp && maxSp && trackerSourceCb && sourceCb) {
 				QJsonObject obj;
 				obj["minKbps"] = minSp->value();
 				obj["maxKbps"] = maxSp->value();
+				obj["trackerSource"] = trackerSourceCb->currentText();
 				obj["sourceName"] = sourceCb->currentText();
 				visArr.append(obj);
 			}
@@ -1327,9 +1344,27 @@ void SrtlaAutoSwitcher::handleFrontendEvent(enum obs_frontend_event event, void 
 	}
 }
 
+static int getListenPortForSource(const QString &sourceName)
+{
+	int port = 5000;
+	if (sourceName.isEmpty()) return port;
+
+	obs_source_t *src = obs_get_source_by_name(sourceName.toUtf8().constData());
+	if (src) {
+		obs_data_t *settings = obs_source_get_settings(src);
+		if (settings) {
+			int p = (int)obs_data_get_int(settings, "listen_port");
+			if (p > 0) port = p;
+			obs_data_release(settings);
+		}
+		obs_source_release(src);
+	}
+	return port;
+}
+
 void SrtlaAutoSwitcher::loadRules()
 {
-	primaryScene = "";
+	primaryTrackerSource = "";
 	failoverScene = "";
 	visibilityRules.clear();
 	volumeRules.clear();
@@ -1337,8 +1372,8 @@ void SrtlaAutoSwitcher::loadRules()
 
 	config_t *global_config = obs_frontend_get_profile_config();
 	if (global_config) {
-		const char *primaryStr = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryScene");
-		if (primaryStr) primaryScene = QString::fromUtf8(primaryStr);
+		const char *trackerStr = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
+		if (trackerStr) primaryTrackerSource = QString::fromUtf8(trackerStr);
 
 		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
 		if (failoverStr) failoverScene = QString::fromUtf8(failoverStr);
@@ -1364,6 +1399,7 @@ void SrtlaAutoSwitcher::loadRules()
 					SourceVisibilityRule r;
 					r.minKbps = obj["minKbps"].toInt();
 					r.maxKbps = obj["maxKbps"].toInt();
+					r.trackerSource = obj["trackerSource"].toString();
 					r.sourceName = obj["sourceName"].toString();
 					visibilityRules.append(r);
 				}
@@ -1514,7 +1550,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	bool visEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled");
 	bool volEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
 
-	if ((!enabled || primaryScene.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty()) &&
+	if ((!enabled || primaryTrackerSource.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty()) &&
 	    (!volEnabled || volumeRules.isEmpty())) {
 		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
@@ -1582,7 +1618,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	}
 
 	// 2. SRTLA Bitrate-based Automation (Scene Auto-Switcher & KBPS Source Visibility)
-	if ((!enabled || primaryScene.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
+	if ((!enabled || primaryTrackerSource.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
 		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
 		currentMatchedVisRules.clear();
@@ -1596,8 +1632,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 	int connections = 0;
 	int listen_port = 0;
 	int failed_conns = 0;
-	char details_buffer[4096] = {0};
-	char rist_details_buffer[4096] = {0};
+	char details_buffer[16384] = {0};
+	char rist_details_buffer[16384] = {0};
 
 	srtla_get_connection_stats(&is_listening, &groups, &connections);
 	srtla_get_connection_details(&listen_port, &failed_conns, details_buffer, sizeof(details_buffer));
@@ -1618,7 +1654,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 		return;
 	}
 
-	double totalKbps = 0;
+	QMap<int, double> portTotalKbps;
 	int activeGroupsWithData = 0;
 
 	QJsonDocument doc = QJsonDocument::fromJson(QByteArray(details_buffer));
@@ -1636,6 +1672,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 	for (int i = 0; i < allGroupsArray.size(); i++) {
 		QJsonObject gObj = allGroupsArray[i].toObject();
+			int gPort = gObj["listen_port"].toInt();
 			QString groupIdStr = QString::number(gObj["id"].toVariant().toULongLong());
 
 			QJsonArray connsArray = gObj["conns"].toArray();
@@ -1658,17 +1695,16 @@ void SrtlaAutoSwitcher::checkBitrate()
 				calculatedSumKbps += cKbps;
 			}
 
-			totalKbps += calculatedSumKbps;
+			portTotalKbps[gPort] += calculatedSumKbps;
 			activeGroupsWithData++;
 		}
 
 	// Clean up previousBytes for disconnected groups
 	if (activeGroupsWithData == 0) {
 		previousBytes.clear();
-		totalKbps = 0; // Ensure 0 if no active data
 	}
 
-	if (enabled && !primaryScene.isEmpty() && !failoverScene.isEmpty()) {
+	if (enabled && !primaryTrackerSource.isEmpty() && !failoverScene.isEmpty()) {
 		obs_source_t *currentScene = obs_frontend_get_current_scene();
 		QString currentSceneName;
 		if (currentScene) {
@@ -1685,7 +1721,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 			matchDurationCounter = 0;
 			originalSceneName = "";
 		} else {
-			bool mediaIsPlaying = srtla_is_any_media_playing();
+			int pPort = getListenPortForSource(primaryTrackerSource);
+			bool mediaIsPlaying = srtla_is_media_playing(pPort);
 
 			if (!mediaIsPlaying) {
 				// Media buffer is completely starved/empty
@@ -1694,8 +1731,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 					if (matchDurationCounter >= delay) {
 						// Delay met, switch to failover
 						if (currentSceneName != failoverScene) {
-							// If we are not on the primary scene, save this scene so we can restore it later
-							if (currentSceneName != primaryScene && originalSceneName.isEmpty()) {
+							// Save this scene so we can restore it later
+							if (originalSceneName.isEmpty()) {
 								originalSceneName = currentSceneName;
 							}
 							obs_source_t *targetSceneSrc = obs_get_source_by_name(failoverScene.toUtf8().constData());
@@ -1711,17 +1748,15 @@ void SrtlaAutoSwitcher::checkBitrate()
 				// Media buffer is successfully delivering frames
 				matchDurationCounter = 0;
 				if (isCurrentlyFailover) {
-					// Immediately switch back to Primary (or original) scene with NO delay
-					QString targetToRestore = primaryScene;
+					// Immediately switch back to original scene with NO delay
 					if (!originalSceneName.isEmpty()) {
-						targetToRestore = originalSceneName;
+						QString targetToRestore = originalSceneName;
 						originalSceneName = "";
-					}
-
-					obs_source_t *targetSceneSrc = obs_get_source_by_name(targetToRestore.toUtf8().constData());
-					if (targetSceneSrc) {
-						obs_frontend_set_current_scene(targetSceneSrc);
-						obs_source_release(targetSceneSrc);
+						obs_source_t *targetSceneSrc = obs_get_source_by_name(targetToRestore.toUtf8().constData());
+						if (targetSceneSrc) {
+							obs_frontend_set_current_scene(targetSceneSrc);
+							obs_source_release(targetSceneSrc);
+						}
 					}
 					isCurrentlyFailover = false;
 				}
@@ -1733,8 +1768,11 @@ void SrtlaAutoSwitcher::checkBitrate()
 		// Evaluate visibility rules
 		QSet<int> matchedVisRules;
 		for (int i = 0; i < visibilityRules.size(); i++) {
-			if (totalKbps >= visibilityRules[i].minKbps &&
-			    (visibilityRules[i].maxKbps == 0 || totalKbps < visibilityRules[i].maxKbps)) {
+			const SourceVisibilityRule &r = visibilityRules[i];
+			int rPort = getListenPortForSource(r.trackerSource);
+			double kbps = portTotalKbps.value(rPort, 0.0);
+
+			if (kbps >= r.minKbps && (r.maxKbps == 0 || kbps <= r.maxKbps)) {
 				matchedVisRules.insert(i);
 			}
 		}

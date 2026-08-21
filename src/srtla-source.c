@@ -45,7 +45,7 @@ struct srtla_source {
 	char *playback_engine;
 
 	int rist_profile;
-	int rist_buffer_ms;
+
 	char *rist_passphrase;
 	int rist_key_size;
 	int rist_stream_id;
@@ -123,12 +123,16 @@ bool srtla_is_audio_starved(int listen_port) {
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
-bool srtla_is_any_media_playing() {
+bool srtla_is_media_playing(int listen_port) {
 	pthread_mutex_lock(&sources_mutex);
 	struct srtla_source *curr = sources_head;
 	bool playing = false;
 	uint64_t now = os_gettime_ns();
 	while (curr) {
+		if (listen_port > 0 && curr->listen_port != listen_port) {
+			curr = curr->next;
+			continue;
+		}
 		bool has_audio = (curr->last_audio_time > 0);
 		if (has_audio) {
 			if (now - curr->last_audio_time < 1000000000ULL) {
@@ -163,8 +167,6 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	context->last_audio_time = now;
 	context->recovery_attempts = 0;
 
-	if (muted) return;
-
 	struct obs_audio_info aoi;
 	if (!obs_get_audio_info(&aoi)) return;
 
@@ -189,40 +191,10 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	}
 	context->current_audio_db = 20.0f * log10f(max_peak);
 
-	// Monotonic sample-accurate timestamp smoothing to eliminate jitter-induced drops in OBS
-	uint64_t sample_rate = (out.samples_per_sec > 0) ? (uint64_t)out.samples_per_sec : 48000ULL;
-	uint64_t frame_duration_ns = ((uint64_t)out.frames * 1000000000ULL) / sample_rate;
-
-	bool is_proxy_engine = context->playback_engine && 
-		(strcmp(context->playback_engine, "vlc") == 0 || strcmp(context->playback_engine, "irl_source") == 0);
-
-	if (is_proxy_engine) {
-		context->last_audio_ts = audio_data->timestamp;
-		context->last_original_ts = audio_data->timestamp;
-		context->current_audio_drift = 0;
-	} else {
-		if (context->last_audio_ts == 0) {
-			context->last_audio_ts = audio_data->timestamp;
-			context->last_original_ts = audio_data->timestamp;
-		} else {
-			uint64_t expected_ts = context->last_audio_ts + frame_duration_ns;
-			int64_t drift = (int64_t)audio_data->timestamp - (int64_t)expected_ts;
-			context->current_audio_drift = drift;
-			
-			// If drift is within +/-50ms, gently nudge towards source clock without causing pitch or audio drop glitches
-			if (drift > -50000000LL && drift < 50000000LL) {
-				expected_ts += (drift / 32);
-			} else {
-				if (drift > 1000000000LL || drift < -1000000000LL) {
-					obs_log(LOG_INFO, "[SRTLA] Massive PTS discontinuity detected (drift: %.2f sec). Resyncing...", (double)drift / 1000000000.0);
-				}
-				// Large PTS discontinuity / resync (e.g. stream reconnect): jump directly to new timestamp
-				expected_ts = audio_data->timestamp;
-			}
-			context->last_audio_ts = expected_ts;
-		}
-	}
-	out.timestamp = context->last_audio_ts;
+	// Output audio exactly as the internal media player generated it, with perfect timestamps.
+	// The parent source will natively handle volume, mute, and routing.
+	out.timestamp = audio_data->timestamp;
+	obs_source_output_audio(context->source, &out);
 
 	// --- Passive Audio Monitor Algorithm ---
 	if (context->ts_window_start == 0 || now - context->ts_window_start >= 2000000000ULL) {
@@ -269,9 +241,6 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 		last_log_time = now;
 	}
 
-	if (!is_proxy_engine) {
-		obs_source_output_audio(context->source, &out);
-	}
 }
 
 static void *srtla_source_create(obs_data_t *settings, obs_source_t *source)
@@ -344,7 +313,15 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_t *irl_settings = obs_data_create();
 		obs_data_set_string(irl_settings, "url", url);
 		obs_data_set_int(irl_settings, "reconnect_delay", 1);
-		obs_data_set_bool(irl_settings, "low_latency_audio", true);
+		
+		// SRT and RIST already handle the huge network latency buffer.
+		// We only need a small buffer in irl_source to absorb local decode/IPC jitter.
+		// Setting this to 15000 causes irl_source to dynamically slow down playback (micro-stutters)
+		// for minutes while it tries to build a second 15-second buffer on top of the SRT/RIST one!
+		obs_data_set_int(irl_settings, "buffer_target_ms", 800);
+		
+		obs_data_set_bool(irl_settings, "low_latency_audio", false); // Disable low_latency_audio to prevent micro-stutters
+		obs_data_set_bool(irl_settings, "adaptive_speed", false); // Disable adaptive speed since local network doesn't need it
 		obs_data_set_bool(irl_settings, "hw_decode", true);
 		obs_data_set_string(irl_settings, "ffmpeg_options",
 				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000");
@@ -420,11 +397,16 @@ static void srtla_create_media_source(struct srtla_source *context)
 	}
 
 	if (context->media_source) {
+		// Permanently mute the internal source from the OBS engine to prevent audio duplication.
+		// We manually forward its audio to the parent source using our capture callback.
+		obs_source_set_muted(context->media_source, true);
+		obs_source_set_audio_mixers(context->media_source, 0);
+		obs_source_set_monitoring_type(context->media_source, OBS_MONITORING_TYPE_NONE);
+
 		if (!use_vlc && !use_irl_source) {
 			obs_source_set_async_decoupled(context->media_source, true);
 			obs_source_set_async_unbuffered(context->media_source, true);
 			obs_source_set_async_decoupled(context->source, true);
-			obs_source_set_audio_mixers(context->media_source, 0);
 		}
 
 		// Always capture audio for DB meter calculations
@@ -504,7 +486,7 @@ static void *srtla_thread_func(void *data)
 		r_cfg.local_srt_port = context->local_srt_port;
 		r_cfg.stop_flag = &context->stop_flag;
 		r_cfg.profile = context->rist_profile;
-		r_cfg.buffer_ms = context->rist_buffer_ms;
+		r_cfg.buffer_ms = context->latency;
 		if (context->rist_passphrase) {
 			strncpy(r_cfg.passphrase, context->rist_passphrase, sizeof(r_cfg.passphrase) - 1);
 		}
@@ -536,8 +518,6 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		if (context->listen_port == 0) {
 			if (new_listen_port == 0)
 				new_listen_port = 5000;
-			if (new_local_srt_port == 0)
-				new_local_srt_port = 4000;
 
 			while (true) {
 				bool conflict = false;
@@ -554,22 +534,6 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 				new_listen_port++;
 			}
 			obs_data_set_int(settings, "listen_port", new_listen_port);
-
-			while (true) {
-				bool conflict = false;
-				pthread_mutex_lock(&sources_mutex);
-				for (struct srtla_source *s = sources_head; s; s = s->next) {
-					if (s != context && s->local_srt_port == new_local_srt_port) {
-						conflict = true;
-						break;
-					}
-				}
-				pthread_mutex_unlock(&sources_mutex);
-				if (!conflict)
-					break;
-				new_local_srt_port++;
-			}
-			obs_data_set_int(settings, "local_srt_port", new_local_srt_port);
 		} else {
 			// Prevent user from changing to an already occupied port
 			bool conflict = false;
@@ -591,6 +555,8 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			}
 		}
 
+		new_local_srt_port = new_listen_port + 1000;
+
 		bool listen_ip_changed = false;
 		if (new_listen_ip) {
 			if (!context->listen_ip || strcmp(context->listen_ip, new_listen_ip) != 0) {
@@ -611,8 +577,11 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		const char *new_passphrase = obs_data_get_string(settings, "rist_passphrase");
 		bool config_changed = false;
 		if (context->protocol != new_proto) config_changed = true;
+		int new_latency = (int)obs_data_get_int(settings, "latency");
+		if (new_latency <= 0) new_latency = 2000;
+		if (context->latency != new_latency) config_changed = true;
+
 		if (context->rist_profile != obs_data_get_int(settings, "rist_profile")) config_changed = true;
-		if (context->rist_buffer_ms != obs_data_get_int(settings, "rist_buffer_ms")) config_changed = true;
 		if (context->rist_key_size != obs_data_get_int(settings, "rist_key_size")) config_changed = true;
 		if (context->rist_stream_id != obs_data_get_int(settings, "rist_stream_id")) config_changed = true;
 		if (new_passphrase && (!context->rist_passphrase || strcmp(context->rist_passphrase, new_passphrase) != 0)) config_changed = true;
@@ -629,12 +598,10 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 
 			context->protocol = new_proto;
 			context->rist_profile = (int)obs_data_get_int(settings, "rist_profile");
-			context->rist_buffer_ms = (int)obs_data_get_int(settings, "rist_buffer_ms");
 			context->rist_key_size = (int)obs_data_get_int(settings, "rist_key_size");
 			context->rist_stream_id = (int)obs_data_get_int(settings, "rist_stream_id");
 			
-			context->latency = (int)obs_data_get_int(settings, "latency");
-			if (context->latency <= 0) context->latency = 2000;
+			context->latency = new_latency;
 
 			if (context->rist_passphrase) bfree(context->rist_passphrase);
 			context->rist_passphrase = new_passphrase ? bstrdup(new_passphrase) : NULL;
@@ -721,7 +688,7 @@ static bool protocol_changed(obs_properties_t *props, obs_property_t *p, obs_dat
 	bool is_rist = (proto && strcmp(proto, "rist") == 0);
 
 	obs_property_set_visible(obs_properties_get(props, "rist_profile"), is_rist);
-	obs_property_set_visible(obs_properties_get(props, "rist_buffer_ms"), is_rist);
+
 	obs_property_set_visible(obs_properties_get(props, "rist_passphrase"), is_rist);
 	obs_property_set_visible(obs_properties_get(props, "rist_key_size"), is_rist);
 	obs_property_set_visible(obs_properties_get(props, "rist_stream_id"), is_rist);
@@ -752,23 +719,17 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 
 	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
 	obs_properties_add_int(props, "listen_port", "SRTLA Listen Port (UDP)", 1, 65535, 1);
-	obs_properties_add_int(props, "latency", "SRTLA Latency (ms)", 0, 30000, 100);
+	obs_properties_add_int(props, "latency", "Latency/Buffer (ms)", 100, 30000, 100);
 	
 	obs_property_t *prof_list = obs_properties_add_list(props, "rist_profile", "RIST Profile", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(prof_list, "Simple", 0);
 	obs_property_list_add_int(prof_list, "Main", 1);
 	obs_property_list_add_int(prof_list, "Advanced", 2);
 	
-	obs_properties_add_int(props, "rist_buffer_ms", "RIST Buffer / Latency (ms)", 0, 30000, 100);
-	obs_properties_add_text(props, "rist_passphrase", "RIST Encryption Passphrase", OBS_TEXT_PASSWORD);
-	
 	obs_property_t *key_list = obs_properties_add_list(props, "rist_key_size", "RIST Key Size", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(key_list, "128", 128);
 	obs_property_list_add_int(key_list, "256", 256);
-	
 	obs_properties_add_int(props, "rist_stream_id", "RIST Stream ID (0 for default)", 0, 65535, 1);
-
-	obs_properties_add_int(props, "local_srt_port", "Local Internal Relay Port", 1, 65535, 1);
 
 	return props;
 }
@@ -779,11 +740,10 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "playback_engine", "ffmpeg");
 	obs_data_set_default_string(settings, "listen_ip", "");
 	obs_data_set_default_int(settings, "listen_port", 5000);
-	obs_data_set_default_int(settings, "local_srt_port", 4000);
-	obs_data_set_default_int(settings, "latency", 2000);
+	obs_data_set_default_int(settings, "latency", 4000);
 	
 	obs_data_set_default_int(settings, "rist_profile", 1);
-	obs_data_set_default_int(settings, "rist_buffer_ms", 1000);
+
 	obs_data_set_default_string(settings, "rist_passphrase", "");
 	obs_data_set_default_int(settings, "rist_key_size", 128);
 	obs_data_set_default_int(settings, "rist_stream_id", 0);
@@ -801,35 +761,9 @@ static void srtla_source_video_tick(void *data, float seconds)
 			srtla_reload_media_source(context);
 		}
 
-		bool is_proxy_engine = context->playback_engine && 
-			(strcmp(context->playback_engine, "vlc") == 0 || strcmp(context->playback_engine, "irl_source") == 0);
-
-		if (is_proxy_engine && context->media_source) {
-			// Mirror audio settings from srtla_source (the proxy) down to the internal vlc_source
-			float vol = obs_source_get_volume(context->source);
-			if (obs_source_get_volume(context->media_source) != vol) {
-				obs_source_set_volume(context->media_source, vol);
-			}
-
-			bool muted = obs_source_muted(context->source);
-			if (obs_source_muted(context->media_source) != muted) {
-				obs_source_set_muted(context->media_source, muted);
-			}
-
-			uint32_t mixers = obs_source_get_audio_mixers(context->source);
-			if (obs_source_get_audio_mixers(context->media_source) != mixers) {
-				obs_source_set_audio_mixers(context->media_source, mixers);
-			}
-
-			int64_t sync_offset = obs_source_get_sync_offset(context->source);
-			if (obs_source_get_sync_offset(context->media_source) != sync_offset) {
-				obs_source_set_sync_offset(context->media_source, sync_offset);
-			}
-			
-			float balance = obs_source_get_balance_value(context->source);
-			if (obs_source_get_balance_value(context->media_source) != balance) {
-				obs_source_set_balance_value(context->media_source, balance);
-			}
+		if (now - context->last_audio_time > 100000000ULL) {
+			// No audio for 100ms -> reset meter so web overlay doesn't get stuck
+			context->current_audio_db = -100.0f;
 		}
 	}
 }

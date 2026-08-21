@@ -250,8 +250,10 @@
                     const now = performance.now();
                     const deltaS = lastTime > 0 ? (now - lastTime) / 1000.0 : 0;
                     
+                    let targetPort = data.primary_tracker_port || 0;
                     if (data.groups && data.groups.length > 0) {
                         data.groups.forEach(g => {
+                            if (targetPort > 0 && g.listen_port !== targetPort) return;
                             if (g.conns) {
                                 g.conns.forEach(c => {
                                     const connId = `${g.id}_${c.ip}:${c.port}`;
@@ -281,6 +283,7 @@
                         document.getElementById('val-kbps').textContent = `${mbps.toFixed(1)} Mbps`;
                     }
                     lastTime = now;
+                    window.lastTargetPort = targetPort;
                 }
 
                 // Fetch Receivers (Audio Drift, Audio DB)
@@ -288,7 +291,10 @@
                 if (resReceivers.ok) {
                     const data = await resReceivers.json();
                     if (data && data.length > 0) {
-                        const activeReceiver = data.find(r => r.running) || data[0];
+                        let targetPort = window.lastTargetPort || 0;
+                        let activeReceiver = null;
+                        if (targetPort > 0) activeReceiver = data.find(r => r.listen_port === targetPort);
+                        if (!activeReceiver) activeReceiver = data.find(r => r.running) || data[0];
                         
                         const drift = activeReceiver.audio_drift_ms || 0;
                         const isAudioStarved = activeReceiver.audio_starved || false;
