@@ -43,6 +43,7 @@ struct srtla_source {
 	char *listen_ip;
 	int latency;
 	char *playback_engine;
+	bool hw_decode;
 
 	int rist_profile;
 
@@ -345,7 +346,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 		
 		obs_data_set_bool(irl_settings, "low_latency_audio", false); // Disable low_latency_audio to prevent micro-stutters
 		obs_data_set_bool(irl_settings, "adaptive_speed", false); // Disable adaptive speed since local network doesn't need it
-		obs_data_set_bool(irl_settings, "hw_decode", true);
+		obs_data_set_bool(irl_settings, "hw_decode", context->hw_decode);
 		obs_data_set_string(irl_settings, "ffmpeg_options",
 				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=500000");
 
@@ -400,7 +401,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_t *media_settings = obs_data_create();
 		obs_data_set_string(media_settings, "input", url);
 		obs_data_set_bool(media_settings, "is_local_file", false);
-		obs_data_set_bool(media_settings, "hw_decode", true);
+		obs_data_set_bool(media_settings, "hw_decode", context->hw_decode);
 		obs_data_set_bool(media_settings, "clear_on_media_end", false);
 		obs_data_set_bool(media_settings, "restart_on_activate", false);
 		obs_data_set_bool(media_settings, "close_when_inactive", false);
@@ -610,7 +611,9 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		if (new_passphrase && (!context->rist_passphrase || strcmp(context->rist_passphrase, new_passphrase) != 0)) config_changed = true;
 		else if (!new_passphrase && context->rist_passphrase) config_changed = true;
 
-		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || engine_changed || context->protocol != new_proto);
+		bool hw_decode_changed = (context->hw_decode != obs_data_get_bool(settings, "hw_decode"));
+
+		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || engine_changed || context->protocol != new_proto || hw_decode_changed);
 		bool thread_restart_needed = (context->listen_port != new_listen_port ||
 					      context->local_srt_port != new_local_srt_port || listen_ip_changed || config_changed ||
 					      !context->thread_running);
@@ -625,6 +628,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			context->rist_stream_id = (int)obs_data_get_int(settings, "rist_stream_id");
 			
 			context->latency = new_latency;
+			context->hw_decode = obs_data_get_bool(settings, "hw_decode");
 
 			if (context->rist_passphrase) bfree(context->rist_passphrase);
 			context->rist_passphrase = new_passphrase ? bstrdup(new_passphrase) : NULL;
@@ -740,6 +744,8 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 	obs_property_list_add_string(engine_list, "VLC (VLC Video Source)", "vlc");
 	obs_property_list_add_string(engine_list, "FFmpeg (Built-in Media Source)", "ffmpeg");
 
+	obs_properties_add_bool(props, "hw_decode", "Hardware Decoding");
+
 	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
 	obs_properties_add_int(props, "listen_port", "SRTLA Listen Port (UDP)", 1, 65535, 1);
 	obs_properties_add_int(props, "latency", "Latency/Buffer (ms)", 100, 30000, 100);
@@ -762,6 +768,7 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "protocol", "srtla");
 	obs_data_set_default_string(settings, "playback_engine", "ffmpeg");
 	obs_data_set_default_string(settings, "listen_ip", "");
+	obs_data_set_default_bool(settings, "hw_decode", true);
 	obs_data_set_default_int(settings, "listen_port", 5000);
 	obs_data_set_default_int(settings, "latency", 4000);
 	
