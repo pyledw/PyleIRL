@@ -29,6 +29,7 @@ private:
 	QTimer *updateTimer;
 
 	QMap<QString, uint64_t> previousBytes;
+	QMap<QString, double> smoothedKbps;
 
 private slots:
 	void openLogFolder();
@@ -141,6 +142,8 @@ private:
 
 	QTimer *timer;
 	QMap<QString, uint64_t> previousBytes;
+	QMap<QString, double> smoothedKbps;
+	QMap<int, int> networkDeadDurationMs;
 
 	QString primaryScene;
 	QString failoverScene;

@@ -65,12 +65,15 @@ struct srtla_source {
 	uint64_t last_media_time;
 	uint64_t connected_since;
 	uint64_t starved_since;
+	uint64_t drift_since;
 	uint64_t last_recovery_time;
 	int recovery_attempts;
 	double current_stream_hz;
 	uint64_t ts_window_start;
 	uint64_t frames_in_window;
 	bool needs_reload;
+	int64_t initial_audio_delay;
+	bool initial_delay_set;
 	int64_t current_audio_drift;
 	float current_audio_db;
 	int auto_reset_count;
@@ -133,14 +136,23 @@ bool srtla_is_media_playing(int listen_port) {
 			curr = curr->next;
 			continue;
 		}
-		bool has_audio = (curr->last_audio_time > 0);
-		if (has_audio) {
-			if (now - curr->last_audio_time < 1000000000ULL) {
+		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 500000000ULL));
+		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 500000000ULL));
+
+		if (curr->last_audio_time > 0 && curr->last_video_time > 0) {
+			// If stream has both audio and video, require video to be playing
+			// This fixes the issue where a frozen video frame wouldn't trigger failover if audio kept going
+			if (audio_playing && video_playing) {
 				playing = true;
 				break;
 			}
-		} else {
-			if (curr->last_video_time > 0 && (now - curr->last_video_time < 1000000000ULL)) {
+		} else if (curr->last_audio_time > 0) {
+			if (audio_playing) {
+				playing = true;
+				break;
+			}
+		} else if (curr->last_video_time > 0) {
+			if (video_playing) {
 				playing = true;
 				break;
 			}
@@ -195,6 +207,13 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	// The parent source will natively handle volume, mute, and routing.
 	out.timestamp = audio_data->timestamp;
 	obs_source_output_audio(context->source, &out);
+
+	int64_t delay = (int64_t)now - (int64_t)audio_data->timestamp;
+	if (!context->initial_delay_set) {
+		context->initial_audio_delay = delay;
+		context->initial_delay_set = true;
+	}
+	context->current_audio_drift = delay - context->initial_audio_delay;
 
 	// --- Passive Audio Monitor Algorithm ---
 	if (context->ts_window_start == 0 || now - context->ts_window_start >= 2000000000ULL) {
@@ -285,8 +304,12 @@ static void srtla_destroy_media_source(struct srtla_source *context)
 	context->last_audio_time = 0;
 	context->current_stream_hz = 0;
 	context->starved_since = 0;
+	context->drift_since = 0;
 	context->ts_window_start = 0;
 	context->frames_in_window = 0;
+	context->initial_delay_set = false;
+	context->initial_audio_delay = 0;
+	context->current_audio_drift = 0;
 }
 
 static void srtla_create_media_source(struct srtla_source *context)
@@ -324,7 +347,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_set_bool(irl_settings, "adaptive_speed", false); // Disable adaptive speed since local network doesn't need it
 		obs_data_set_bool(irl_settings, "hw_decode", true);
 		obs_data_set_string(irl_settings, "ffmpeg_options",
-				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000");
+				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=500000");
 
 		context->media_source = obs_source_create_private("irl_source", source_name, irl_settings);
 		obs_data_release(irl_settings);
@@ -384,7 +407,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_set_int(media_settings, "reconnect_delay_sec", 1);
 		obs_data_set_int(media_settings, "buffering_mb", 0);
 		obs_data_set_string(media_settings, "ffmpeg_options",
-				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000");
+				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=500000");
 
 		context->media_source = obs_source_create_private("ffmpeg_source", source_name, media_settings);
 		obs_data_release(media_settings);
@@ -639,7 +662,7 @@ static void srtla_source_video_render(void *data, gs_effect_t *effect)
 		obs_source_video_render(context->media_source);
 		if (obs_source_get_base_width(context->media_source) > 0) {
 			uint64_t current_media_time = obs_source_media_get_time(context->media_source);
-			if (current_media_time != context->last_media_time || current_media_time == 0) {
+			if (current_media_time != context->last_media_time) {
 				context->last_video_time = os_gettime_ns();
 				context->last_media_time = current_media_time;
 			}
@@ -803,6 +826,10 @@ void srtla_force_stop(void *data)
 			context->connected_since = 0;
 			context->last_audio_time = 0;
 			context->starved_since = 0;
+			context->drift_since = 0;
+			context->initial_delay_set = false;
+			context->initial_audio_delay = 0;
+			context->current_audio_drift = 0;
 			context->last_recovery_time = 0;
 			context->recovery_attempts = 0;
 			context->pending_recovery = RECOVERY_NONE;
@@ -941,16 +968,30 @@ void srtla_auto_recover_hung_sources()
 				s->starved_since = 0;
 			}
 
+			// Condition E: Severe audio drift (> 1000ms) continuously for >= 5s
+			bool severe_audio_drift = false;
+			if (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) &&
+			    (s->current_audio_drift > 1000000000LL || s->current_audio_drift < -1000000000LL)) {
+				if (s->drift_since == 0) {
+					s->drift_since = now;
+				} else if (now - s->drift_since >= 5000000000ULL) {
+					severe_audio_drift = true;
+				}
+			} else {
+				s->drift_since = 0;
+			}
+
 			// Condition D: Audio is receiving normally, but video has completely stopped for >= 8s
 			bool video_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) &&
 					      s->last_video_time > 0 && (now - s->last_video_time >= 8000000000ULL));
 
 			// Only attempt auto-recovery up to 2 times to avoid looping on video-only or mic-less streams
-			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved || video_dropped)) {
+			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved || video_dropped || severe_audio_drift)) {
 				s->recovery_attempts++;
 				s->auto_reset_count++;
 				s->last_recovery_time = now;
 				s->starved_since = 0;
+				s->drift_since = 0;
 
 				if (missing_on_connect) {
 					obs_log(LOG_WARNING,
@@ -964,6 +1005,10 @@ void srtla_auto_recover_hung_sources()
 					obs_log(LOG_WARNING,
 						"[SRTLA] Port %d video stopped for >8s while audio active! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, s->recovery_attempts);
+				} else if (severe_audio_drift) {
+					obs_log(LOG_WARNING,
+						"[SRTLA] Port %d severe audio drift detected (%lld ms)! Auto-reloading media player (attempt %d/2).",
+						s->listen_port, (long long)(s->current_audio_drift / 1000000LL), s->recovery_attempts);
 				} else {
 					obs_log(LOG_WARNING,
 						"[SRTLA] Port %d audio starved (%.1f Hz < 30kHz) for >6s! Auto-reloading media player (attempt %d/2).",
@@ -978,6 +1023,10 @@ void srtla_auto_recover_hung_sources()
 			s->last_video_time = 0;
 			s->last_audio_time = 0;
 			s->starved_since = 0;
+			s->drift_since = 0;
+			s->initial_delay_set = false;
+			s->initial_audio_delay = 0;
+			s->current_audio_drift = 0;
 			s->current_stream_hz = 0;
 			s->last_recovery_time = 0;
 			s->recovery_attempts = 0;
