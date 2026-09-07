@@ -345,10 +345,13 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_set_int(irl_settings, "buffer_target_ms", 800);
 		
 		obs_data_set_bool(irl_settings, "low_latency_audio", false); // Disable low_latency_audio to prevent micro-stutters
-		obs_data_set_bool(irl_settings, "adaptive_speed", false); // Disable adaptive speed since local network doesn't need it
+		obs_data_set_bool(irl_settings, "adaptive_speed", true); // Enable adaptive speed to fix audio drift over time
 		obs_data_set_bool(irl_settings, "hw_decode", context->hw_decode);
-		obs_data_set_string(irl_settings, "ffmpeg_options",
-				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=500000");
+		char ffmpeg_opts[256];
+		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
+			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=%d", 
+			(context->latency + 5000) * 1000);
+		obs_data_set_string(irl_settings, "ffmpeg_options", ffmpeg_opts);
 
 		context->media_source = obs_source_create_private("irl_source", source_name, irl_settings);
 		obs_data_release(irl_settings);
@@ -407,8 +410,11 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_set_bool(media_settings, "close_when_inactive", false);
 		obs_data_set_int(media_settings, "reconnect_delay_sec", 1);
 		obs_data_set_int(media_settings, "buffering_mb", 0);
-		obs_data_set_string(media_settings, "ffmpeg_options",
-				    "fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=500000");
+		char ffmpeg_opts[256];
+		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
+			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=%d", 
+			(context->latency + 5000) * 1000);
+		obs_data_set_string(media_settings, "ffmpeg_options", ffmpeg_opts);
 
 		context->media_source = obs_source_create_private("ffmpeg_source", source_name, media_settings);
 		obs_data_release(media_settings);
