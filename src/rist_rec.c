@@ -51,6 +51,14 @@ typedef struct {
     int peer_count;
     char stats_json[4096]; // Cached JSON stats from librist
     rist_peer_t peers[32]; // Store active peers robustly
+    double quality;
+    uint32_t lost_packets;
+    uint32_t retries;
+    uint32_t missing_queue;
+    uint32_t rtt;
+    uint32_t lost_history[30];
+    uint32_t retries_history[30];
+    int history_index;
 } rist_ctx_info_t;
 
 static rist_ctx_info_t *global_rist_contexts[MAX_RIST_INSTANCES] = {0};
@@ -161,6 +169,59 @@ static int rist_stats_cb(void *arg, const struct rist_stats *stats_container) {
             if (root) {
                 json_t *recv_stats = json_object_get(root, "receiver-stats");
                 json_t *flow_inst = json_object_get(recv_stats, "flowinstant");
+                json_t *flow_stats = json_object_get(flow_inst, "stats");
+                if (flow_stats) {
+                    json_t *quality_obj = json_object_get(flow_stats, "quality");
+                    if (quality_obj) {
+                        double current_q = json_is_real(quality_obj) ? json_real_value(quality_obj) : json_integer_value(quality_obj);
+                        if (info->quality == 0.0) info->quality = 100.0; // Initialize
+                        if (current_q < info->quality) {
+                            info->quality = current_q; // Instant drop so the user sees it
+                        } else {
+                            info->quality = (info->quality * 0.9) + (current_q * 0.1); // Smooth 10% recovery per second
+                        }
+                    }
+                    
+                    uint32_t current_lost = 0;
+                    uint32_t current_retries = 0;
+
+                    json_t *lost_obj = json_object_get(flow_stats, "lost");
+                    if (lost_obj) current_lost += (uint32_t)json_integer_value(lost_obj);
+                    
+                    json_t *dropped_late_obj = json_object_get(flow_stats, "dropped_late");
+                    if (dropped_late_obj && json_integer_value(dropped_late_obj) > 0) {
+                        current_lost += (uint32_t)json_integer_value(dropped_late_obj);
+                        blog(LOG_WARNING, "[PyleIRL] [RIST] ⚠️ WARNING: %u packets dropped (late)!", (uint32_t)json_integer_value(dropped_late_obj));
+                    }
+                    
+                    json_t *dropped_full_obj = json_object_get(flow_stats, "dropped_full");
+                    if (dropped_full_obj && json_integer_value(dropped_full_obj) > 0) {
+                        current_lost += (uint32_t)json_integer_value(dropped_full_obj);
+                        blog(LOG_WARNING, "[PyleIRL] [RIST] ⚠️ WARNING: %u packets dropped (queue full)!", (uint32_t)json_integer_value(dropped_full_obj));
+                    }
+
+                    if (lost_obj && (uint32_t)json_integer_value(lost_obj) > 0) {
+                        blog(LOG_WARNING, "[PyleIRL] [RIST] ❌ WARNING: %u packets permanently LOST! Screen jitter/freeze likely occurred.", (uint32_t)json_integer_value(lost_obj));
+                    }
+                    
+                    json_t *retries_obj = json_object_get(flow_stats, "retries");
+                    if (retries_obj) current_retries += (uint32_t)json_integer_value(retries_obj);
+                    
+                    // 30s sliding window
+                    info->lost_history[info->history_index] = current_lost;
+                    info->retries_history[info->history_index] = current_retries;
+                    info->history_index = (info->history_index + 1) % 30;
+                    
+                    info->lost_packets = 0;
+                    info->retries = 0;
+                    for (int i = 0; i < 30; i++) {
+                        info->lost_packets += info->lost_history[i];
+                        info->retries += info->retries_history[i];
+                    }
+                    
+                    json_t *missing_queue_obj = json_object_get(flow_stats, "missing_queue");
+                    if (missing_queue_obj) info->missing_queue = (uint32_t)json_integer_value(missing_queue_obj);
+                }
                 json_t *peers = json_object_get(flow_inst, "peers");
                 
                 uint64_t now_ms = os_gettime_ns() / 1000000;
@@ -174,6 +235,9 @@ static int rist_stats_cb(void *arg, const struct rist_stats *stats_container) {
                             int peer_id = (int)json_integer_value(json_object_get(value, "id"));
                             json_t *bitrate_obj = json_object_get(peer_stats, "bitrate");
                             double bitrate = json_is_real(bitrate_obj) ? json_real_value(bitrate_obj) : json_integer_value(bitrate_obj);
+                            
+                            json_t *rtt_obj = json_object_get(peer_stats, "rtt");
+                            if (rtt_obj) info->rtt = (uint32_t)json_integer_value(rtt_obj);
                             
                             json_t *url_obj = json_object_get(value, "url");
                             const char *url_str = url_obj ? json_string_value(url_obj) : NULL;
@@ -413,8 +477,9 @@ void rist_get_connection_details(char* out_buffer, int max_len) {
             
             // Re-format RIST JSON into SRTLA JSON format
             // Group ID for RIST can just be the listen port + 10000 to keep it unique
-            offset += snprintf(out_buffer + offset, max_len - offset, "{\"id\":%llu,\"bytes\":%llu,\"listen_port\":%d,\"conns\":[", 
-                (unsigned long long)(info->listen_port + 10000), (unsigned long long)info->total_bytes, info->listen_port);
+            offset += snprintf(out_buffer + offset, max_len - offset, "{\"id\":%llu,\"bytes\":%llu,\"listen_port\":%d,\"quality\":%.1f,\"lost\":%u,\"retries\":%u,\"missing_queue\":%u,\"rtt\":%u,\"conns\":[", 
+                (unsigned long long)(info->listen_port + 10000), (unsigned long long)info->total_bytes, info->listen_port, info->quality,
+                info->lost_packets, info->retries, info->missing_queue, info->rtt);
             
             bool first_conn = true;
             uint64_t now_ms = os_gettime_ns() / 1000000;

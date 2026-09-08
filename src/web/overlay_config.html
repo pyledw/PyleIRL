@@ -158,6 +158,31 @@
                         <input type="checkbox" id="chk-db" checked onchange="updatePreview()">
                         <label for="chk-db" style="cursor:pointer;flex:1;">Audio DB Level</label>
                     </li>
+                    <li class="sortable-item" data-id="quality" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-quality" checked onchange="updatePreview()">
+                        <label for="chk-quality" style="cursor:pointer;flex:1;">Link Quality (%)</label>
+                    </li>
+                    <li class="sortable-item" data-id="lost" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-lost" checked onchange="updatePreview()">
+                        <label for="chk-lost" style="cursor:pointer;flex:1;">Lost Packets</label>
+                    </li>
+                    <li class="sortable-item" data-id="retries" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-retries" checked onchange="updatePreview()">
+                        <label for="chk-retries" style="cursor:pointer;flex:1;">Recovered Packets</label>
+                    </li>
+                    <li class="sortable-item" data-id="queue" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-queue" checked onchange="updatePreview()">
+                        <label for="chk-queue" style="cursor:pointer;flex:1;">Missing Queue</label>
+                    </li>
+                    <li class="sortable-item" data-id="rtt" draggable="true">
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox" id="chk-rtt" checked onchange="updatePreview()">
+                        <label for="chk-rtt" style="cursor:pointer;flex:1;">RTT (ms)</label>
+                    </li>
                 </ul>
             </div>
 

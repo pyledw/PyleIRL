@@ -44,6 +44,7 @@ struct srtla_source {
 	int latency;
 	char *playback_engine;
 	bool hw_decode;
+	bool nuclear_sync;
 
 	int rist_profile;
 
@@ -78,6 +79,8 @@ struct srtla_source {
 	int64_t current_audio_drift;
 	float current_audio_db;
 	int auto_reset_count;
+	uint64_t session_start_time;
+	uint64_t total_audio_frames_session;
 
 	struct srtla_source *next;
 };
@@ -204,17 +207,25 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 	}
 	context->current_audio_db = 20.0f * log10f(max_peak);
 
-	// Output audio exactly as the internal media player generated it, with perfect timestamps.
+	// Output audio exactly as the internal media player generated it.
 	// The parent source will natively handle volume, mute, and routing.
-	out.timestamp = audio_data->timestamp;
+	if (context->nuclear_sync) {
+		out.timestamp = now; // Nuclear sync: force exactly to system wall clock right now
+	} else {
+		out.timestamp = audio_data->timestamp;
+	}
 	obs_source_output_audio(context->source, &out);
 
-	int64_t delay = (int64_t)now - (int64_t)audio_data->timestamp;
 	if (!context->initial_delay_set) {
-		context->initial_audio_delay = delay;
+		context->session_start_time = now;
+		context->total_audio_frames_session = 0;
 		context->initial_delay_set = true;
 	}
-	context->current_audio_drift = delay - context->initial_audio_delay;
+	context->total_audio_frames_session += out.frames;
+
+	double expected_time_sec = (double)context->total_audio_frames_session / (double)out.samples_per_sec;
+	double elapsed_time_sec = (double)(now - context->session_start_time) / 1000000000.0;
+	context->current_audio_drift = (int64_t)((elapsed_time_sec - expected_time_sec) * 1000000000.0);
 
 	// --- Passive Audio Monitor Algorithm ---
 	if (context->ts_window_start == 0 || now - context->ts_window_start >= 2000000000ULL) {
@@ -244,9 +255,9 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 		if (ts_gap > max_gap) max_gap = ts_gap;
 	}
 
-	if (now - last_log_time > 1000000000ULL) {
+	if (now - last_log_time > 10000000000ULL) {
 		double computed_hz = (last_log_time > 0) ? ((double)total_frames / (double)(now - last_log_time) * 1000000000.0) : 0;
-		obs_log(LOG_INFO, "[SRTLA Audio Diagnostic] 1s Stats | calls: %d | total_frames: %d | min_gap: %.2f ms | max_gap: %.2f ms | stream_hz: %.1f | obs_hz: %lu | current_ts: %llu",
+		obs_log(LOG_INFO, "[SRTLA Audio Diagnostic] 10s Stats | calls: %d | total_frames: %d | min_gap: %.2f ms | max_gap: %.2f ms | stream_hz: %.1f | obs_hz: %lu | current_ts: %llu",
 			call_count, total_frames, 
 			(min_gap == (uint64_t)-1) ? 0 : (double)min_gap / 1000000.0, 
 			(double)max_gap / 1000000.0,
@@ -311,6 +322,8 @@ static void srtla_destroy_media_source(struct srtla_source *context)
 	context->initial_delay_set = false;
 	context->initial_audio_delay = 0;
 	context->current_audio_drift = 0;
+	context->session_start_time = 0;
+	context->total_audio_frames_session = 0;
 }
 
 static void srtla_create_media_source(struct srtla_source *context)
@@ -432,6 +445,9 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_source_set_muted(context->media_source, true);
 		obs_source_set_audio_mixers(context->media_source, 0);
 		obs_source_set_monitoring_type(context->media_source, OBS_MONITORING_TYPE_NONE);
+
+		// Prevent parent source from adding any A/V sync drift buffering of its own
+		obs_source_set_async_unbuffered(context->source, true);
 
 		if (!use_vlc && !use_irl_source) {
 			obs_source_set_async_decoupled(context->media_source, true);
@@ -618,13 +634,14 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		else if (!new_passphrase && context->rist_passphrase) config_changed = true;
 
 		bool hw_decode_changed = (context->hw_decode != obs_data_get_bool(settings, "hw_decode"));
+		bool nuclear_sync_changed = (context->nuclear_sync != obs_data_get_bool(settings, "nuclear_sync"));
 
 		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || engine_changed || context->protocol != new_proto || hw_decode_changed);
 		bool thread_restart_needed = (context->listen_port != new_listen_port ||
 					      context->local_srt_port != new_local_srt_port || listen_ip_changed || config_changed ||
 					      !context->thread_running);
 
-		if (thread_restart_needed || media_restart_needed) {
+		if (thread_restart_needed || media_restart_needed || nuclear_sync_changed) {
 			srtla_stop_thread(context);
 			context->auto_reset_count = 0;
 
@@ -635,6 +652,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			
 			context->latency = new_latency;
 			context->hw_decode = obs_data_get_bool(settings, "hw_decode");
+			context->nuclear_sync = obs_data_get_bool(settings, "nuclear_sync");
 
 			if (context->rist_passphrase) bfree(context->rist_passphrase);
 			context->rist_passphrase = new_passphrase ? bstrdup(new_passphrase) : NULL;
@@ -750,6 +768,7 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 	obs_property_list_add_string(engine_list, "VLC (VLC Video Source)", "vlc");
 	obs_property_list_add_string(engine_list, "FFmpeg (Built-in Media Source)", "ffmpeg");
 
+	obs_properties_add_bool(props, "nuclear_sync", "Nuclear Audio Sync (Force system time to prevent drift)");
 	obs_properties_add_bool(props, "hw_decode", "Hardware Decoding");
 
 	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
@@ -775,6 +794,7 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "playback_engine", "ffmpeg");
 	obs_data_set_default_string(settings, "listen_ip", "");
 	obs_data_set_default_bool(settings, "hw_decode", true);
+	obs_data_set_default_bool(settings, "nuclear_sync", false);
 	obs_data_set_default_int(settings, "listen_port", 5000);
 	obs_data_set_default_int(settings, "latency", 4000);
 	

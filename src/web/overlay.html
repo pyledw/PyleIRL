@@ -163,6 +163,46 @@
                 <div id="val-db" class="metric-value">-100.0 dB</div>
             </div>
         </div>
+
+        <div id="card-quality" class="metric-card">
+            <div class="metric-icon">📉</div>
+            <div class="metric-content">
+                <div class="metric-label">Link Quality</div>
+                <div id="val-quality" class="metric-value">100%</div>
+            </div>
+        </div>
+
+        <div id="card-lost" class="metric-card">
+            <div class="metric-icon">❌</div>
+            <div class="metric-content">
+                <div class="metric-label">Lost Packets</div>
+                <div id="val-lost" class="metric-value">0</div>
+            </div>
+        </div>
+
+        <div id="card-retries" class="metric-card">
+            <div class="metric-icon">🔄</div>
+            <div class="metric-content">
+                <div class="metric-label">Recovered</div>
+                <div id="val-retries" class="metric-value">0</div>
+            </div>
+        </div>
+
+        <div id="card-queue" class="metric-card">
+            <div class="metric-icon">🕒</div>
+            <div class="metric-content">
+                <div class="metric-label">Missing Queue</div>
+                <div id="val-queue" class="metric-value">0</div>
+            </div>
+        </div>
+
+        <div id="card-rtt" class="metric-card">
+            <div class="metric-icon">📡</div>
+            <div class="metric-content">
+                <div class="metric-label">RTT</div>
+                <div id="val-rtt" class="metric-value">0 ms</div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -170,7 +210,7 @@
         const container = document.getElementById('overlay-container');
         
         // Visibility toggles
-        const toggles = ['kbps', 'scene', 'sync', 'status', 'db'];
+        const toggles = ['kbps', 'scene', 'sync', 'status', 'db', 'quality', 'lost', 'retries', 'queue', 'rtt'];
         toggles.forEach(t => {
             if (params.get(t) === 'off') {
                 document.getElementById(`card-${t}`).classList.add('hidden');
@@ -251,9 +291,19 @@
                     const deltaS = lastTime > 0 ? (now - lastTime) / 1000.0 : 0;
                     
                     let targetPort = data.primary_tracker_port || 0;
+                    let displayQuality = 100.0;
+                    let displayLost = 0;
+                    let displayRetries = 0;
+                    let displayQueue = 0;
+                    let displayRtt = 0;
                     if (data.groups && data.groups.length > 0) {
                         data.groups.forEach(g => {
                             if (targetPort > 0 && g.listen_port !== targetPort) return;
+                            if (g.quality !== undefined) displayQuality = g.quality;
+                            if (g.lost !== undefined) displayLost = g.lost;
+                            if (g.retries !== undefined) displayRetries = g.retries;
+                            if (g.missing_queue !== undefined) displayQueue = g.missing_queue;
+                            if (g.rtt !== undefined) displayRtt = g.rtt;
                             if (g.conns) {
                                 g.conns.forEach(c => {
                                     const connId = `${g.id}_${c.ip}:${c.port}`;
@@ -282,6 +332,12 @@
                         const mbps = totalKbps / 1000.0;
                         document.getElementById('val-kbps').textContent = `${mbps.toFixed(1)} Mbps`;
                     }
+                    document.getElementById('val-quality').textContent = `${displayQuality.toFixed(1)}%`;
+                    document.getElementById('val-lost').textContent = displayLost;
+                    document.getElementById('val-retries').textContent = displayRetries;
+                    document.getElementById('val-queue').textContent = displayQueue;
+                    document.getElementById('val-rtt').textContent = displayRtt + ' ms';
+                    
                     lastTime = now;
                     window.lastTargetPort = targetPort;
                 }

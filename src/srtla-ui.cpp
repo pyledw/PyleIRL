@@ -375,6 +375,15 @@ void SrtlaStatusWidget::updateStatus()
 					groupItem->setExpanded(true);
 				}
 
+				if (gObj.contains("quality")) {
+					double quality = gObj["quality"].toDouble();
+					int lost = gObj["lost"].toInt();
+					int retries = gObj["retries"].toInt();
+					int missing_q = gObj["missing_queue"].toInt();
+					int rtt = gObj["rtt"].toInt();
+					nodeName += QString("  [Quality: %1% | Lost: %2 | Retries: %3 | Queue: %4 | RTT: %5ms]").arg(quality, 0, 'f', 1).arg(lost).arg(retries).arg(missing_q).arg(rtt);
+				}
+
 				if (srtla_is_audio_starved(listenPortStr.toInt())) {
 					groupItem->setText(0, nodeName + "  [⚠️ BAD AUDIO / OUT OF SYNC]");
 					groupItem->setForeground(0, QBrush(QColor("#F44336"))); // Red
