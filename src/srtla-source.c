@@ -21,6 +21,84 @@ extern int srtla_rec_main(const char *listen_ip, int listen_port, const char *sr
 extern int srtla_get_group_count_by_port(int listen_port);
 extern void srtla_reset_group_by_port(int listen_port);
 
+static uint32_t srtla_global_lost_history[30] = {0};
+static uint32_t srtla_global_retries_history[30] = {0};
+static int srtla_global_history_index = 0;
+static uint32_t srtla_global_lost = 0;
+static uint32_t srtla_global_retries = 0;
+static uint32_t srtla_global_queue = 0;
+static uint32_t srtla_last_pktdrop = 0;
+static uint32_t srtla_last_quality_events = 0;
+
+void srtla_get_external_stats(uint32_t *lost, uint32_t *retries, uint32_t *queue, uint32_t *rtt) {
+    *lost = srtla_global_lost;
+    *retries = srtla_global_retries;
+    *queue = srtla_global_queue;
+    *rtt = 0; // Not available
+}
+
+static log_handler_t original_log_handler = NULL;
+static void *original_log_param = NULL;
+
+static void irl_log_handler(int log_level, const char *msg, va_list args, void *param) {
+    if (original_log_handler) {
+        va_list args_copy;
+        va_copy(args_copy, args);
+        original_log_handler(log_level, msg, args_copy, original_log_param);
+        va_end(args_copy);
+    }
+
+    (void)param;
+    if (!msg) return;
+
+    char buffer[2048];
+    vsnprintf(buffer, sizeof(buffer), msg, args);
+
+    if (strstr(buffer, "[irl-source] Stats:") != NULL) {
+        uint32_t buf = 0;
+        uint32_t pktdrop = 0;
+        uint32_t quality_events = 0;
+
+        const char *buf_ptr = strstr(buffer, "buf=");
+        if (buf_ptr) sscanf(buf_ptr, "buf=%ums", &buf);
+
+        const char *pktdrop_ptr = strstr(buffer, "pktdrop=");
+        if (pktdrop_ptr) sscanf(pktdrop_ptr, "pktdrop=%u", &pktdrop);
+
+        const char *quality_events_ptr = strstr(buffer, "quality_events=");
+        if (quality_events_ptr) sscanf(quality_events_ptr, "quality_events=%u", &quality_events);
+
+        uint32_t delta_lost = (pktdrop >= srtla_last_pktdrop) ? (pktdrop - srtla_last_pktdrop) : 0;
+        uint32_t delta_retries = (quality_events >= srtla_last_quality_events) ? (quality_events - srtla_last_quality_events) : 0;
+        
+        srtla_last_pktdrop = pktdrop;
+        srtla_last_quality_events = quality_events;
+        srtla_global_queue = buf;
+
+        srtla_global_lost_history[srtla_global_history_index] = delta_lost;
+        srtla_global_retries_history[srtla_global_history_index] = delta_retries;
+        srtla_global_history_index = (srtla_global_history_index + 1) % 30;
+
+        srtla_global_lost = 0;
+        srtla_global_retries = 0;
+        for (int i = 0; i < 30; i++) {
+            srtla_global_lost += srtla_global_lost_history[i];
+            srtla_global_retries += srtla_global_retries_history[i];
+        }
+    }
+}
+
+void srtla_init_log_handler(void) {
+    base_get_log_handler(&original_log_handler, &original_log_param);
+    base_set_log_handler(irl_log_handler, NULL);
+}
+
+void srtla_free_log_handler(void) {
+    if (original_log_handler) {
+        base_set_log_handler(original_log_handler, original_log_param);
+    }
+}
+
 enum srtla_recovery_action {
 	RECOVERY_NONE = 0,
 	RECOVERY_RELOAD,
@@ -350,6 +428,11 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_t *irl_settings = obs_data_create();
 		obs_data_set_string(irl_settings, "url", url);
 		obs_data_set_int(irl_settings, "reconnect_delay", 1);
+		
+		// Attempt to override obs-irl-source's hardcoded 8s stream stall watchdog
+		obs_data_set_int(irl_settings, "timeout_sec", (context->latency / 1000) + 5);
+		obs_data_set_int(irl_settings, "timeout", (context->latency / 1000) + 5);
+		obs_data_set_int(irl_settings, "connect_timeout", (context->latency / 1000) + 5);
 		
 		// SRT and RIST already handle the huge network latency buffer.
 		// We only need a small buffer in irl_source to absorb local decode/IPC jitter.

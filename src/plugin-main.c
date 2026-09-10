@@ -68,9 +68,13 @@ static void register_source_compat(struct obs_source_info *info)
 	obs_register_source_s(info, info_size);
 }
 
+extern void srtla_init_log_handler(void);
+extern void srtla_free_log_handler(void);
+
 bool obs_module_load(void)
 {
 	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
+	srtla_init_log_handler();
 	register_source_compat(&srtla_source_info);
 	register_source_compat(&srtla_stats_filter_info);
 	obs_frontend_add_event_callback(frontend_event_cb, NULL);
@@ -79,5 +83,6 @@ bool obs_module_load(void)
 
 void obs_module_unload(void)
 {
+	srtla_free_log_handler();
 	obs_log(LOG_INFO, "plugin unloaded");
 }
