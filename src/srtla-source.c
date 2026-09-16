@@ -122,7 +122,6 @@ struct srtla_source {
 	int latency;
 	char *playback_engine;
 	bool hw_decode;
-	bool nuclear_sync;
 
 	int rist_profile;
 
@@ -287,11 +286,7 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 
 	// Output audio exactly as the internal media player generated it.
 	// The parent source will natively handle volume, mute, and routing.
-	if (context->nuclear_sync) {
-		out.timestamp = now; // Nuclear sync: force exactly to system wall clock right now
-	} else {
-		out.timestamp = audio_data->timestamp;
-	}
+	out.timestamp = audio_data->timestamp;
 	obs_source_output_audio(context->source, &out);
 
 	if (!context->initial_delay_set) {
@@ -717,14 +712,13 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		else if (!new_passphrase && context->rist_passphrase) config_changed = true;
 
 		bool hw_decode_changed = (context->hw_decode != obs_data_get_bool(settings, "hw_decode"));
-		bool nuclear_sync_changed = (context->nuclear_sync != obs_data_get_bool(settings, "nuclear_sync"));
 
 		bool media_restart_needed = (!context->media_source || context->local_srt_port != new_local_srt_port || engine_changed || context->protocol != new_proto || hw_decode_changed);
 		bool thread_restart_needed = (context->listen_port != new_listen_port ||
 					      context->local_srt_port != new_local_srt_port || listen_ip_changed || config_changed ||
 					      !context->thread_running);
 
-		if (thread_restart_needed || media_restart_needed || nuclear_sync_changed) {
+		if (thread_restart_needed || media_restart_needed) {
 			srtla_stop_thread(context);
 			context->auto_reset_count = 0;
 
@@ -735,7 +729,6 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			
 			context->latency = new_latency;
 			context->hw_decode = obs_data_get_bool(settings, "hw_decode");
-			context->nuclear_sync = obs_data_get_bool(settings, "nuclear_sync");
 
 			if (context->rist_passphrase) bfree(context->rist_passphrase);
 			context->rist_passphrase = new_passphrase ? bstrdup(new_passphrase) : NULL;
@@ -851,7 +844,6 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 	obs_property_list_add_string(engine_list, "VLC (VLC Video Source)", "vlc");
 	obs_property_list_add_string(engine_list, "FFmpeg (Built-in Media Source)", "ffmpeg");
 
-	obs_properties_add_bool(props, "nuclear_sync", "Nuclear Audio Sync (Force system time to prevent drift)");
 	obs_properties_add_bool(props, "hw_decode", "Hardware Decoding");
 
 	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
@@ -877,7 +869,6 @@ static void srtla_source_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "playback_engine", "ffmpeg");
 	obs_data_set_default_string(settings, "listen_ip", "");
 	obs_data_set_default_bool(settings, "hw_decode", true);
-	obs_data_set_default_bool(settings, "nuclear_sync", false);
 	obs_data_set_default_int(settings, "listen_port", 5000);
 	obs_data_set_default_int(settings, "latency", 4000);
 	

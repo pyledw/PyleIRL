@@ -884,7 +884,7 @@ void connection_cleanup(time_t ts) {
 
   /* Also attempt SRT re-handshake for groups in WAITING_SRT state */
   for (conn_group_t *g = groups; g != NULL; g = g->next) {
-    if (g->state == G_WAITING_SRT) {
+    if (g->state == G_WAITING_SRT && g->conns != NULL) {
       uint64_t now_ms = 0;
       uint64_t tmp = 0;
       if (get_ms(&tmp) == 0) now_ms = tmp;

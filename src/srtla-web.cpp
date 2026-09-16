@@ -525,8 +525,7 @@ static void handle_api_autoswitch_get(const httplib::Request &req, httplib::Resp
 		obj["vol_enabled"] = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
 		obj["vol_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay"));
 		
-		const char *tracker = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
-		obj["primary_tracker_source"] = tracker ? QString(tracker) : "";
+
 	}
 	QJsonDocument doc(obj);
 	res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
@@ -561,8 +560,7 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 		if (obj.contains("visibility_rules"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON",
 					  obj["visibility_rules"].toString().toUtf8().constData());
-		if (obj.contains("primary_tracker_source"))
-			config_set_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource", obj["primary_tracker_source"].toString().toUtf8().constData());
+
 		if (obj.contains("volume_rules"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON",
 					  obj["volume_rules"].toString().toUtf8().constData());
@@ -628,23 +626,9 @@ static void handle_api_stats(const httplib::Request &req, httplib::Response &res
 		root["ports"] = ports;
 	}
 	
-	config_t *global_config = obs_frontend_get_profile_config();
-	if (global_config) {
-		const char *pts = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
-		if (pts && *pts) {
-			int pPort = 5000;
-			obs_source_t *src = obs_get_source_by_name(pts);
-			if (src) {
-				obs_data_t *settings = obs_source_get_settings(src);
-				if (settings) {
-					int p = (int)obs_data_get_int(settings, "listen_port");
-					if (p > 0) pPort = p;
-					obs_data_release(settings);
-				}
-				obs_source_release(src);
-			}
-			root["primary_tracker_port"] = pPort;
-		}
+	int pPort = SrtlaAutoSwitcher::instance().getActivePrimaryPort();
+	if (pPort > 0) {
+		root["primary_tracker_port"] = pPort;
 	}
 	
 	QJsonDocument mergedDoc(root);

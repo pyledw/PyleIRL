@@ -294,10 +294,7 @@
                     <span class="slider"></span>
                 </label>
             </div>
-            <div class="setting-row" style="flex-direction:column; align-items:flex-start; margin-bottom:15px; border-bottom:none;">
-                <label style="margin-bottom:5px; font-weight:bold;">Primary Ingestion Source (for Scene Switcher)</label>
-                <select id="setting-primary-tracker" class="rsrc" style="width:100%; box-sizing:border-box;"></select>
-            </div>
+
             <div class="setting-row">
                 <span>Web Interface Session</span>
                 <button class="btn-danger" onclick="logout()" style="padding:5px 10px;">Logout</button>
@@ -1092,7 +1089,7 @@
             while(visTable.rows.length > 1) visTable.deleteRow(1);
             visRules.forEach(r => addVisAutoSwitchRule(r.minKbps, r.maxKbps, r.sourceName, r.trackerSource));
             
-            if (document.getElementById('setting-primary-tracker')) document.getElementById('setting-primary-tracker').setAttribute('data-val', data.primary_tracker_source || "");
+
             if (document.getElementById('setting-vol-autoswitch')) document.getElementById('setting-vol-autoswitch').checked = !!data.vol_enabled;
             if (document.getElementById('setting-vol-delay')) document.getElementById('setting-vol-delay').value = data.vol_delay || 2;
             const volRules = JSON.parse(data.volume_rules || "[]");
@@ -1191,7 +1188,7 @@
                 rules: JSON.stringify(rules),
                 no_failover_scenes: JSON.stringify(noFailover),
                 visibility_rules: JSON.stringify(visRules),
-                primary_tracker_source: document.getElementById('setting-primary-tracker') ? document.getElementById('setting-primary-tracker').value : "",
+
                 volume_rules: JSON.stringify(volRules),
                 vol_enabled: document.getElementById('setting-vol-autoswitch') ? document.getElementById('setting-vol-autoswitch').checked : false,
                 vol_delay: document.getElementById('setting-vol-delay') ? parseInt(document.getElementById('setting-vol-delay').value) : 2

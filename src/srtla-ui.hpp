@@ -99,7 +99,6 @@ private slots:
 private:
 	QComboBox *enableAutoSwitch;
 	QSpinBox *switchDelay;
-	QComboBox *primarySourceBox;
 	QComboBox *failoverSceneBox;
 	QListWidget *noFailoverList;
 
@@ -133,6 +132,9 @@ public:
 	void reloadRules();
 	QJsonObject getAudioLevels();
 
+	int getActivePrimaryPort() const { return activePrimaryPort; }
+	QString getActivePrimarySource() const { return activePrimarySource; }
+
 private slots:
 	void checkBitrate();
 
@@ -150,7 +152,9 @@ private:
 	QVector<SourceVisibilityRule> visibilityRules;
 	QVector<VolumeVisibilityRule> volumeRules;
 
-	QString primaryTrackerSource;
+	int activePrimaryPort;
+	QString activePrimarySource;
+
 	QSet<QString> noFailoverScenes;
 	bool isCurrentlyFailover;
 	int matchDurationCounter;

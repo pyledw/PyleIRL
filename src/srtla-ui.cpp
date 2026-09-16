@@ -792,7 +792,6 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	switchDelay->setSuffix(" seconds");
 	switchDelay->setValue(2); // Default 2 seconds
 
-	primarySourceBox = new QComboBox();
 	failoverSceneBox = new QComboBox();
 
 	// Populate scenes
@@ -846,10 +845,6 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	}
 
 	sceneLayout->addRow("Enable Media Auto-Switch:", enableAutoSwitch);
-	for (const QString &sourceName : availableSources) {
-		primarySourceBox->addItem(sourceName);
-	}
-	sceneLayout->addRow("Primary Ingestion Source:", primarySourceBox);
 	sceneLayout->addRow("Failover (Disconnected) Scene:", failoverSceneBox);
 	sceneLayout->addRow("Switch Delay (Failover only):", switchDelay);
 
@@ -945,13 +940,6 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		int delay = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
 		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "Delay")) {
 			switchDelay->setValue(delay);
-		}
-
-		const char *primaryTracker = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
-		if (primaryTracker && *primaryTracker) {
-			int idx = primarySourceBox->findText(QString::fromUtf8(primaryTracker));
-			if (idx >= 0) primarySourceBox->setCurrentIndex(idx);
-			else primarySourceBox->setCurrentText(QString::fromUtf8(primaryTracker));
 		}
 
 		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
@@ -1121,7 +1109,6 @@ void SrtlaAutoSwitchDialog::saveSettings()
 	if (global_config) {
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "Enabled", enableAutoSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "Delay", switchDelay->value());
-		config_set_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource", primarySourceBox->currentText().toUtf8().constData());
 		config_set_string(global_config, "SRTLA_AutoSwitch", "FailoverScene", failoverSceneBox->currentText().toUtf8().constData());
 
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled", enableVisSwitch->currentIndex() == 1);
@@ -1200,7 +1187,8 @@ SrtlaAutoSwitcher::SrtlaAutoSwitcher(QObject *parent)
 	  isCurrentlyFailover(false),
 	  matchDurationCounter(0),
 	  visMatchDurationCounter(0),
-	  volMatchDurationCounter(0)
+	  volMatchDurationCounter(0),
+	  activePrimaryPort(0)
 {
 	connect(timer, &QTimer::timeout, this, &SrtlaAutoSwitcher::checkBitrate);
 	obs_frontend_add_event_callback(handleFrontendEvent, this);
@@ -1373,7 +1361,6 @@ static int getListenPortForSource(const QString &sourceName)
 
 void SrtlaAutoSwitcher::loadRules()
 {
-	primaryTrackerSource = "";
 	failoverScene = "";
 	visibilityRules.clear();
 	volumeRules.clear();
@@ -1381,8 +1368,6 @@ void SrtlaAutoSwitcher::loadRules()
 
 	config_t *global_config = obs_frontend_get_profile_config();
 	if (global_config) {
-		const char *trackerStr = config_get_string(global_config, "SRTLA_AutoSwitch", "PrimaryTrackerSource");
-		if (trackerStr) primaryTrackerSource = QString::fromUtf8(trackerStr);
 
 		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
 		if (failoverStr) failoverScene = QString::fromUtf8(failoverStr);
@@ -1559,7 +1544,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	bool visEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled");
 	bool volEnabled = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
 
-	if ((!enabled || primaryTrackerSource.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty()) &&
+	if ((!enabled || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty()) &&
 	    (!volEnabled || volumeRules.isEmpty())) {
 		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
@@ -1627,7 +1612,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	}
 
 	// 2. SRTLA Bitrate-based Automation (Scene Auto-Switcher & KBPS Source Visibility)
-	if ((!enabled || primaryTrackerSource.isEmpty() || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
+	if ((!enabled || failoverScene.isEmpty()) && (!visEnabled || visibilityRules.isEmpty())) {
 		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
 		currentMatchedVisRules.clear();
@@ -1713,7 +1698,48 @@ void SrtlaAutoSwitcher::checkBitrate()
 		previousBytes.clear();
 	}
 
-	if (enabled && !primaryTrackerSource.isEmpty() && !failoverScene.isEmpty()) {
+	// Dynamically track primary source based on media playing state
+	bool currentPrimaryActive = false;
+	if (activePrimaryPort > 0 && srtla_is_media_playing(activePrimaryPort)) {
+		currentPrimaryActive = true;
+	}
+
+	if (!currentPrimaryActive) {
+		int newPrimaryPort = 0;
+		for (auto it = portTotalKbps.begin(); it != portTotalKbps.end(); ++it) {
+			if (srtla_is_media_playing(it.key())) {
+				newPrimaryPort = it.key();
+				break;
+			}
+		}
+		
+		if (newPrimaryPort > 0 && newPrimaryPort != activePrimaryPort) {
+			activePrimaryPort = newPrimaryPort;
+			
+			struct PortContext {
+				int searchPort;
+				QString name;
+			} ctx;
+			ctx.searchPort = newPrimaryPort;
+			
+			obs_enum_sources([](void *data, obs_source_t *source) {
+				PortContext *c = static_cast<PortContext *>(data);
+				obs_data_t *settings = obs_source_get_settings(source);
+				if (settings) {
+					int p = (int)obs_data_get_int(settings, "listen_port");
+					if (p == c->searchPort) {
+						const char *n = obs_source_get_name(source);
+						if (n) c->name = QString::fromUtf8(n);
+					}
+					obs_data_release(settings);
+				}
+				return c->name.isEmpty();
+			}, &ctx);
+			activePrimarySource = ctx.name;
+		}
+	}
+
+	if (enabled && activePrimaryPort > 0 && !failoverScene.isEmpty()) {
 		obs_source_t *currentScene = obs_frontend_get_current_scene();
 		QString currentSceneName;
 		if (currentScene) {
@@ -1730,8 +1756,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 			matchDurationCounter = 0;
 			originalSceneName = "";
 		} else {
-			int pPort = getListenPortForSource(primaryTrackerSource);
-			bool mediaIsPlaying = srtla_is_media_playing(pPort);
+			bool mediaIsPlaying = srtla_is_media_playing(activePrimaryPort);
 
 			if (!mediaIsPlaying) {
 				// Media buffer is completely starved/empty
