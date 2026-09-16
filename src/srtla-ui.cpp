@@ -2025,6 +2025,8 @@ public:
 	QComboBox *typeCombo;
 	QLineEdit *urlEdit;
 	QLineEdit *keyEdit;
+	QCheckBox *verticalCheck;
+	QComboBox *sceneCombo;
 
 	MultistreamTargetConfigDialog(QWidget *parent, const MultistreamTargetConfig &initial)
 		: QDialog(parent),
@@ -2047,10 +2049,37 @@ public:
 		keyEdit = new QLineEdit(config.key);
 		keyEdit->setEchoMode(QLineEdit::PasswordEchoOnEdit);
 
+		verticalCheck = new QCheckBox("Send Vertical Layout");
+		verticalCheck->setChecked(config.isVertical);
+		
+		sceneCombo = new QComboBox();
+		sceneCombo->addItem("", "");
+		struct obs_frontend_source_list scenes = {};
+		obs_frontend_get_scenes(&scenes);
+		for (size_t i = 0; i < scenes.sources.num; i++) {
+			obs_source_t *scene_source = scenes.sources.array[i];
+			const char *name = obs_source_get_name(scene_source);
+			if (name) {
+				sceneCombo->addItem(QString::fromUtf8(name), QString::fromUtf8(name));
+			}
+		}
+		obs_frontend_source_list_free(&scenes);
+		
+		if (!config.targetScene.isEmpty()) {
+			int idx = sceneCombo->findData(config.targetScene);
+			if (idx != -1) sceneCombo->setCurrentIndex(idx);
+		}
+		
+		// Only show scene picker if vertical is checked
+		sceneCombo->setEnabled(config.isVertical);
+		connect(verticalCheck, &QCheckBox::toggled, sceneCombo, &QWidget::setEnabled);
+
 		form->addRow("Name:", nameEdit);
 		form->addRow("Type:", typeCombo);
 		form->addRow("URL:", urlEdit);
 		form->addRow("Stream Key:", keyEdit);
+		form->addRow("", verticalCheck);
+		form->addRow("Vertical Target Scene:", sceneCombo);
 
 		layout->addLayout(form);
 
@@ -2062,6 +2091,8 @@ public:
 			this->config.type = typeCombo->currentText();
 			this->config.url = urlEdit->text();
 			this->config.key = keyEdit->text();
+			this->config.isVertical = verticalCheck->isChecked();
+			this->config.targetScene = sceneCombo->currentData().toString();
 			accept();
 		});
 		connect(btnBox, &QDialogButtonBox::rejected, this, &QDialog::reject);

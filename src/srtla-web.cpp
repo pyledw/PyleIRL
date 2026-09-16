@@ -1066,3 +1066,9 @@ bool srtla_web_server_is_running()
 {
 	return is_running;
 }
+
+extern "C" void pyleirl_shutdown(void)
+{
+	srtla_web_server_stop();
+	MultistreamManager::instance().stopAll();
+}

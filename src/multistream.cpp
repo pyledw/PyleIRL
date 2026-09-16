@@ -14,6 +14,8 @@ QJsonObject MultistreamTargetConfig::toJson() const
 	obj["url"] = url;
 	obj["key"] = key;
 	obj["enabled"] = enabled;
+	obj["isVertical"] = isVertical;
+	obj["targetScene"] = targetScene;
 	return obj;
 }
 
@@ -26,6 +28,8 @@ MultistreamTargetConfig MultistreamTargetConfig::fromJson(const QJsonObject &obj
 	c.url = obj["url"].toString();
 	c.key = obj["key"].toString();
 	c.enabled = obj["enabled"].toBool(true);
+	c.isVertical = obj["isVertical"].toBool(false);
+	c.targetScene = obj["targetScene"].toString();
 	if (c.id.isEmpty()) {
 		c.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
 	}
@@ -110,9 +114,21 @@ void MultistreamTarget::cleanupOutput()
 		obs_service_release(service);
 		service = nullptr;
 	}
+	if (custom_video_enc) {
+		obs_encoder_release(custom_video_enc);
+		custom_video_enc = nullptr;
+	}
+	if (view) {
+		if (video_output) {
+			obs_view_remove(view);
+			video_output = nullptr;
+		}
+		obs_view_destroy(view);
+		view = nullptr;
+	}
 }
 
-bool MultistreamTarget::cloneEncoders()
+bool MultistreamTarget::setupEncoders()
 {
 	if (!output)
 		return false;
@@ -121,9 +137,79 @@ bool MultistreamTarget::cloneEncoders()
 	if (!main_output)
 		return false;
 
-	obs_encoder_t *video_enc = obs_output_get_video_encoder(main_output);
-	if (video_enc) {
-		obs_output_set_video_encoder(output, video_enc);
+	if (config.isVertical && !config.targetScene.trimmed().isEmpty()) {
+		obs_source_t *target_scene = obs_get_source_by_name(config.targetScene.toUtf8().constData());
+		if (target_scene) {
+			uint32_t width = obs_source_get_width(target_scene);
+			uint32_t height = obs_source_get_height(target_scene);
+
+			struct obs_video_info ovi = {0};
+			obs_get_video_info(&ovi);
+
+			if (width > height && height > 0) {
+				// Horizontal source (e.g. 1920x1080). Crop the center 9:16 column.
+				uint32_t target_w = (height * 9) / 16;
+				float offset_x = (float)(width - target_w) / 2.0f;
+
+				obs_scene_t *crop_scene = obs_scene_create_private("multistream_crop_scene");
+				obs_sceneitem_t *item = obs_scene_add(crop_scene, target_scene);
+				
+				// Force Top-Left alignment so positioning is absolute
+				obs_sceneitem_set_alignment(item, OBS_ALIGN_TOP | OBS_ALIGN_LEFT);
+				
+				struct vec2 pos = {-offset_x, 0.0f};
+				obs_sceneitem_set_pos(item, &pos);
+				
+				obs_source_t *crop_source = obs_scene_get_source(crop_scene);
+
+				view = obs_view_create();
+				obs_view_set_source(view, 0, crop_source);
+				
+				obs_source_release(target_scene);
+				obs_scene_release(crop_scene);
+
+				ovi.base_width = target_w;
+				ovi.base_height = height;
+			} else {
+				// Already vertical or square, no cropping needed
+				view = obs_view_create();
+				obs_view_set_source(view, 0, target_scene);
+				obs_source_release(target_scene);
+
+				ovi.base_width = width > 0 ? width : 1080;
+				ovi.base_height = height > 0 ? height : 1920;
+			}
+
+			ovi.output_width = 1080;
+			ovi.output_height = 1920;
+
+			video_output = obs_view_add2(view, &ovi);
+			if (video_output) {
+				obs_encoder_t *main_vid = obs_output_get_video_encoder(main_output);
+				if (main_vid) {
+					obs_data_t *main_settings = obs_encoder_get_settings(main_vid);
+					const char *enc_id = obs_encoder_get_id(main_vid);
+					
+					custom_video_enc = obs_video_encoder_create(enc_id, "multistream_vert_enc", main_settings, nullptr);
+					obs_data_release(main_settings);
+
+					if (custom_video_enc) {
+						obs_encoder_set_video(custom_video_enc, video_output);
+						obs_output_set_video_encoder(output, custom_video_enc);
+					}
+				}
+			}
+		} else {
+			blog(LOG_WARNING, "Multistream: Target scene %s not found for vertical stream", config.targetScene.toUtf8().constData());
+		}
+	}
+
+	// Fallback or normal clone for video if not setup
+	if (!custom_video_enc) {
+		obs_encoder_t *video_enc = obs_output_get_video_encoder(main_output);
+		if (video_enc) {
+			obs_output_set_video_encoder(output, video_enc);
+		}
 	}
 
 	// Clone audio encoders (up to max audio mixes)
@@ -161,8 +247,8 @@ void MultistreamTarget::start()
 		return;
 
 	initOutput();
-	if (!cloneEncoders()) {
-		// Could not clone encoders (main stream might not be running)
+	if (!setupEncoders()) {
+		// Could not setup encoders
 		setStatus(STOPPED);
 		return;
 	}

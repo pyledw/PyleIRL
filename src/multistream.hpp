@@ -14,6 +14,8 @@ struct MultistreamTargetConfig {
 	QString url;
 	QString key;
 	bool enabled = true;
+	bool isVertical = false;
+	QString targetScene;
 
 	QJsonObject toJson() const;
 	static MultistreamTargetConfig fromJson(const QJsonObject &obj);
@@ -42,11 +44,14 @@ private:
 	MultistreamTargetConfig config;
 	obs_output_t *output = nullptr;
 	obs_service_t *service = nullptr;
+	obs_view_t *view = nullptr;
+	video_t *video_output = nullptr;
+	obs_encoder_t *custom_video_enc = nullptr;
 	Status status = STOPPED;
 
 	void initOutput();
 	void cleanupOutput();
-	bool cloneEncoders();
+	bool setupEncoders();
 
 	void setStatus(Status newStatus);
 

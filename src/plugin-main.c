@@ -70,6 +70,7 @@ static void register_source_compat(struct obs_source_info *info)
 
 extern void srtla_init_log_handler(void);
 extern void srtla_free_log_handler(void);
+extern void pyleirl_shutdown(void);
 
 bool obs_module_load(void)
 {
@@ -83,6 +84,7 @@ bool obs_module_load(void)
 
 void obs_module_unload(void)
 {
+	pyleirl_shutdown();
 	srtla_free_log_handler();
 	obs_log(LOG_INFO, "plugin unloaded");
 }
