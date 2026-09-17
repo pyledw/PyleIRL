@@ -105,7 +105,7 @@ int active_connections = 0;
 int has_connected = 0;
 
 /* runtime flags */
-int flag_auto_reconnect = 1;
+int flag_auto_reconnect = 0;
 int flag_log_errors = 0;
 int flag_reconnect_interval_ms = 500;
 

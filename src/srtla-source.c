@@ -436,7 +436,7 @@ static void srtla_create_media_source(struct srtla_source *context)
 		obs_data_set_int(irl_settings, "buffer_target_ms", 800);
 		
 		obs_data_set_bool(irl_settings, "low_latency_audio", false); // Disable low_latency_audio to prevent micro-stutters
-		obs_data_set_bool(irl_settings, "adaptive_speed", true); // Enable adaptive speed to fix audio drift over time
+		obs_data_set_bool(irl_settings, "adaptive_speed", false); // Disabled to allow A/V sync drift detection
 		obs_data_set_bool(irl_settings, "hw_decode", context->hw_decode);
 		char ffmpeg_opts[256];
 		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
