@@ -97,8 +97,8 @@ static inline int get_addr_len(const struct sockaddr *addr) {
 #define MAX_GROUPS          200
 
 #define CLEANUP_PERIOD 3
-#define GROUP_TIMEOUT  60
-#define CONN_TIMEOUT   60
+#define GROUP_TIMEOUT  90
+#define CONN_TIMEOUT   90
 
 #define RECV_ACK_INT 10
 #ifndef min
@@ -186,7 +186,7 @@ pthread_mutex_t global_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define ADDR_LEN sizeof(struct sockaddr_storage)
 
 /* runtime flags */
-int flag_auto_reconnect = 0;
+int flag_auto_reconnect = 1;
 int flag_log_errors = 0;
 int flag_reconnect_interval_ms = 500;
 
@@ -428,6 +428,21 @@ int group_reg(struct sockaddr *addr, char *in_buf, time_t ts) {
     group_destroy(old_g, NULL);
   }
 
+  // NEW LOGIC: We are about to create a NEW group.
+  // If there are ANY existing groups, we MUST destroy them so they don't fight the new group!
+  // And we MUST send a Shutdown to the target so it instantly restarts and accepts the new group!
+  conn_group_t *existing_g = groups;
+  while (existing_g) {
+    conn_group_t *next = existing_g->next;
+    if (existing_g->srt_sock > 0) {
+      uint32_t buf[4] = {0};
+      buf[0] = htobe32((uint32_t)(SRT_TYPE_SHUTDOWN) << 16);
+      send(existing_g->srt_sock, (char*)buf, 16, 0);
+    }
+    group_destroy(existing_g, NULL);
+    existing_g = next;
+  }
+
   // Allocate the group
   g = group_create(id, ts);
   if (g == NULL) goto err;
@@ -617,10 +632,6 @@ void handle_srt_data(conn_group_t *g) {
       }
     }
   } else {
-    if (is_srt_shutdown(buf, n)) {
-      info("Group %llu: Dropped SRT Shutdown from OBS to phone to prevent client disconnect\n", (unsigned long long)g->logical_group_id);
-      continue;
-    }
     // send other packets over the most recently used SRTLA connection
     int ret = SENDTO(srtla_sock, &buf, n, 0, (struct sockaddr*)&g->last_addr, sizeof(struct sockaddr_storage));
     if (ret != n) {
@@ -803,11 +814,6 @@ void handle_srtla_data(time_t ts) {
       continue;
     }
 #endif
-  }
-
-  if (is_srt_shutdown(buf, n)) {
-    info("Group %llu: Intercepted SRT Shutdown from client to let OBS play out buffer\n", (unsigned long long)g->logical_group_id);
-    continue;
   }
 
   ret = send(g->srt_sock, buf, n, 0);
@@ -1432,6 +1438,20 @@ int srtla_get_group_count_by_port(int listen_port) {
     }
     pthread_mutex_unlock(&global_ctx_mutex);
     return count;
+}
+
+uint64_t srtla_get_group_seq_by_port(int listen_port) {
+    uint64_t seq = 0;
+    pthread_mutex_lock(&global_ctx_mutex);
+    for (int i = 0; i < MAX_SRTLA_INSTANCES; i++) {
+        srtla_ctx_t *ctx = global_contexts[i];
+        if (ctx && ctx->_listen_port == listen_port) {
+            seq = ctx->_group_seq;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&global_ctx_mutex);
+    return seq;
 }
 
 void srtla_reset_group_by_port(int listen_port) {

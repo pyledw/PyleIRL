@@ -9,31 +9,26 @@
 #include <media-io/audio-io.h>
 
 #include "compat_pthread.h"
+#include "rist_rec.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 #include <math.h>
 
-extern int srtla_rec_main(const char *listen_ip, int listen_port, const char *srt_host, int srt_port,
-			  volatile int *stop_flag);
-extern int srtla_get_group_count_by_port(int listen_port);
-extern void srtla_reset_group_by_port(int listen_port);
-extern uint64_t srtla_get_group_seq_by_port(int listen_port);
+static uint32_t rist_global_lost_history[30] = {0};
+static uint32_t rist_global_retries_history[30] = {0};
+static int rist_global_history_index = 0;
+static uint32_t rist_global_lost = 0;
+static uint32_t rist_global_retries = 0;
+static uint32_t rist_global_queue = 0;
+static uint32_t rist_last_pktdrop = 0;
+static uint32_t rist_last_quality_events = 0;
 
-static uint32_t srtla_global_lost_history[30] = {0};
-static uint32_t srtla_global_retries_history[30] = {0};
-static int srtla_global_history_index = 0;
-static uint32_t srtla_global_lost = 0;
-static uint32_t srtla_global_retries = 0;
-static uint32_t srtla_global_queue = 0;
-static uint32_t srtla_last_pktdrop = 0;
-static uint32_t srtla_last_quality_events = 0;
-
-void srtla_get_external_stats(uint32_t *lost, uint32_t *retries, uint32_t *queue, uint32_t *rtt) {
-    *lost = srtla_global_lost;
-    *retries = srtla_global_retries;
-    *queue = srtla_global_queue;
+void rist_get_external_stats(uint32_t *lost, uint32_t *retries, uint32_t *queue, uint32_t *rtt) {
+    *lost = rist_global_lost;
+    *retries = rist_global_retries;
+    *queue = rist_global_queue;
     *rtt = 0; // Not available
 }
 
@@ -68,44 +63,44 @@ static void irl_log_handler(int log_level, const char *msg, va_list args, void *
         const char *quality_events_ptr = strstr(buffer, "quality_events=");
         if (quality_events_ptr) sscanf(quality_events_ptr, "quality_events=%u", &quality_events);
 
-        uint32_t delta_lost = (pktdrop >= srtla_last_pktdrop) ? (pktdrop - srtla_last_pktdrop) : 0;
-        uint32_t delta_retries = (quality_events >= srtla_last_quality_events) ? (quality_events - srtla_last_quality_events) : 0;
+        uint32_t delta_lost = (pktdrop >= rist_last_pktdrop) ? (pktdrop - rist_last_pktdrop) : 0;
+        uint32_t delta_retries = (quality_events >= rist_last_quality_events) ? (quality_events - rist_last_quality_events) : 0;
         
-        srtla_last_pktdrop = pktdrop;
-        srtla_last_quality_events = quality_events;
-        srtla_global_queue = buf;
+        rist_last_pktdrop = pktdrop;
+        rist_last_quality_events = quality_events;
+        rist_global_queue = buf;
 
-        srtla_global_lost_history[srtla_global_history_index] = delta_lost;
-        srtla_global_retries_history[srtla_global_history_index] = delta_retries;
-        srtla_global_history_index = (srtla_global_history_index + 1) % 30;
+        rist_global_lost_history[rist_global_history_index] = delta_lost;
+        rist_global_retries_history[rist_global_history_index] = delta_retries;
+        rist_global_history_index = (rist_global_history_index + 1) % 30;
 
-        srtla_global_lost = 0;
-        srtla_global_retries = 0;
+        rist_global_lost = 0;
+        rist_global_retries = 0;
         for (int i = 0; i < 30; i++) {
-            srtla_global_lost += srtla_global_lost_history[i];
-            srtla_global_retries += srtla_global_retries_history[i];
+            rist_global_lost += rist_global_lost_history[i];
+            rist_global_retries += rist_global_retries_history[i];
         }
     }
 }
 
-void srtla_init_log_handler(void) {
+void rist_init_log_handler(void) {
     base_get_log_handler(&original_log_handler, &original_log_param);
     base_set_log_handler(irl_log_handler, NULL);
 }
 
-void srtla_free_log_handler(void) {
+void rist_free_log_handler(void) {
     if (original_log_handler) {
         base_set_log_handler(original_log_handler, original_log_param);
     }
 }
 
-enum srtla_recovery_action {
+enum rist_recovery_action {
 	RECOVERY_NONE = 0,
 	RECOVERY_RELOAD,
 	RECOVERY_RESTART
 };
 
-struct srtla_source {
+struct rist_source {
 	obs_source_t *source;
 	obs_source_t *media_source;
 
@@ -116,12 +111,18 @@ struct srtla_source {
 	char *playback_engine;
 	bool hw_decode;
 
-	pthread_t srtla_thread;
+	int rist_profile;
+
+	char *rist_passphrase;
+	int rist_key_size;
+	int rist_stream_id;
+
+	pthread_t rist_thread;
 	volatile int stop_flag;
 	bool thread_running;
 	bool was_connected;
 	
-	enum srtla_recovery_action pending_recovery;
+	enum rist_recovery_action pending_recovery;
 	
 	uint64_t last_audio_ts;
 	uint64_t last_original_ts;
@@ -145,17 +146,16 @@ struct srtla_source {
 	int auto_reset_count;
 	uint64_t session_start_time;
 	uint64_t total_audio_frames_session;
-	uint64_t last_group_seq;
 
-	struct srtla_source *next;
+	struct rist_source *next;
 };
 
-static struct srtla_source *sources_head = NULL;
+static struct rist_source *sources_head = NULL;
 static pthread_mutex_t sources_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static bool srtla_is_audio_starved_locked(struct srtla_source *curr) {
+static bool rist_is_audio_starved_locked(struct rist_source *curr) {
 	if (!curr) return false;
-	int groups = srtla_get_group_count_by_port(curr->listen_port);
+	int groups = rist_get_peer_count_by_port(curr->listen_port);
 	if (groups > 0) {
 		uint64_t now = os_gettime_ns();
 		// Only flag starved if video is active (received in the last 2s) and:
@@ -172,13 +172,13 @@ static bool srtla_is_audio_starved_locked(struct srtla_source *curr) {
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
-bool srtla_is_audio_starved(int listen_port) {
+bool rist_is_audio_starved(int listen_port) {
 	pthread_mutex_lock(&sources_mutex);
-	struct srtla_source *curr = sources_head;
+	struct rist_source *curr = sources_head;
 	bool starved = false;
 	while (curr) {
 		if (curr->listen_port == listen_port) {
-			starved = srtla_is_audio_starved_locked(curr);
+			starved = rist_is_audio_starved_locked(curr);
 			break;
 		}
 		curr = curr->next;
@@ -190,9 +190,31 @@ bool srtla_is_audio_starved(int listen_port) {
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
-bool srtla_is_media_playing(int listen_port) {
+bool rist_is_media_playing(int listen_port) {
+	// If no sender is connected at the network level, immediately report not playing.
+	// This prevents the RIST buffer from draining before the failover triggers,
+	// which would cause a freeze/stall period before the scene switches.
+	if (rist_get_peer_count_by_port(listen_port) == 0) {
+		// Only return false if we've ever had frames — don't false-trigger on startup
+		pthread_mutex_lock(&sources_mutex);
+		struct rist_source *curr = sources_head;
+		bool ever_had_frames = false;
+		while (curr) {
+			if (listen_port > 0 && curr->listen_port != listen_port) {
+				curr = curr->next;
+				continue;
+			}
+			if (curr->last_audio_time > 0 || curr->last_video_time > 0)
+				ever_had_frames = true;
+			break;
+		}
+		pthread_mutex_unlock(&sources_mutex);
+		if (ever_had_frames)
+			return false;
+	}
+
 	pthread_mutex_lock(&sources_mutex);
-	struct srtla_source *curr = sources_head;
+	struct rist_source *curr = sources_head;
 	bool playing = false;
 	uint64_t now = os_gettime_ns();
 	while (curr) {
@@ -227,16 +249,16 @@ bool srtla_is_media_playing(int listen_port) {
 	return playing;
 }
 
-static const char *srtla_source_get_name(void *type_data)
+static const char *rist_source_get_name(void *type_data)
 {
 	UNUSED_PARAMETER(type_data);
-	return "SRTLA Receiver";
+	return "RIST Receiver";
 }
 
-static void srtla_audio_capture_cb(void *param, obs_source_t *source, const struct audio_data *audio_data, bool muted)
+static void rist_audio_capture_cb(void *param, obs_source_t *source, const struct audio_data *audio_data, bool muted)
 {
 	UNUSED_PARAMETER(source);
-	struct srtla_source *context = param;
+	struct rist_source *context = param;
 	if (!context || !audio_data) return;
 
 	uint64_t now = os_gettime_ns();
@@ -317,7 +339,7 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 
 	if (now - last_log_time > 10000000000ULL) {
 		double computed_hz = (last_log_time > 0) ? ((double)total_frames / (double)(now - last_log_time) * 1000000000.0) : 0;
-		obs_log(LOG_INFO, "[SRTLA Audio Diagnostic] 10s Stats | calls: %d | total_frames: %d | min_gap: %.2f ms | max_gap: %.2f ms | stream_hz: %.1f | obs_hz: %lu | current_ts: %llu",
+		obs_log(LOG_INFO, "[RIST Audio Diagnostic] 10s Stats | calls: %d | total_frames: %d | min_gap: %.2f ms | max_gap: %.2f ms | stream_hz: %.1f | obs_hz: %lu | current_ts: %llu",
 			call_count, total_frames, 
 			(min_gap == (uint64_t)-1) ? 0 : (double)min_gap / 1000000.0, 
 			(double)max_gap / 1000000.0,
@@ -334,9 +356,9 @@ static void srtla_audio_capture_cb(void *param, obs_source_t *source, const stru
 
 }
 
-static void *srtla_source_create(obs_data_t *settings, obs_source_t *source)
+static void *rist_source_create(obs_data_t *settings, obs_source_t *source)
 {
-	struct srtla_source *context = bzalloc(sizeof(struct srtla_source));
+	struct rist_source *context = bzalloc(sizeof(struct rist_source));
 	context->source = source;
 	context->thread_running = false;
 	
@@ -352,19 +374,19 @@ static void *srtla_source_create(obs_data_t *settings, obs_source_t *source)
 	return context;
 }
 
-static void srtla_stop_thread(struct srtla_source *context)
+static void rist_stop_thread(struct rist_source *context)
 {
 	if (context->thread_running) {
 		context->stop_flag = 1;
-		pthread_join(context->srtla_thread, NULL);
+		pthread_join(context->rist_thread, NULL);
 		context->thread_running = false;
 	}
 }
 
-static void srtla_destroy_media_source_internal(struct srtla_source *context, obs_source_t *media)
+static void rist_destroy_media_source_internal(struct rist_source *context, obs_source_t *media)
 {
 	if (media) {
-		obs_source_remove_audio_capture_callback(media, srtla_audio_capture_cb, context);
+		obs_source_remove_audio_capture_callback(media, rist_audio_capture_cb, context);
 		obs_source_dec_active(media);
 		obs_source_release(media);
 	}
@@ -383,16 +405,16 @@ static void srtla_destroy_media_source_internal(struct srtla_source *context, ob
 	context->total_audio_frames_session = 0;
 }
 
-static obs_source_t* srtla_create_media_source_internal(struct srtla_source *context)
+static obs_source_t* rist_create_media_source_internal(struct rist_source *context)
 {
 	obs_source_t *new_media = NULL;
 
 	char url[256];
-	snprintf(url, sizeof(url), "srt://127.0.0.1:%d?mode=listener&latency=%d", context->local_srt_port, context->latency);
+	snprintf(url, sizeof(url), "udp://127.0.0.1:%d?pkt_size=1316&buffer_size=8388608&fifo_size=500000", context->local_srt_port);
 
 	char source_name[256];
 	const char *parent_name = obs_source_get_name(context->source);
-	snprintf(source_name, sizeof(source_name), "%s_Internal", parent_name ? parent_name : "SRTLA");
+	snprintf(source_name, sizeof(source_name), "%s_Internal", parent_name ? parent_name : "RIST");
 
 	bool use_vlc = (context->playback_engine && strcmp(context->playback_engine, "vlc") == 0);
 	bool use_irl_source = (context->playback_engine && strcmp(context->playback_engine, "irl_source") == 0);
@@ -402,10 +424,10 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		obs_data_set_string(irl_settings, "url", url);
 		obs_data_set_int(irl_settings, "reconnect_delay", 1);
 		
-		// We use a 90 second timeout so the stream freezes instead of dropping during long tunnel outages
-		obs_data_set_int(irl_settings, "timeout_sec", 90);
-		obs_data_set_int(irl_settings, "timeout", 90000000);
-		obs_data_set_int(irl_settings, "connect_timeout", 90000000);
+		// Attempt to override obs-irl-source's hardcoded 8s stream stall watchdog
+		obs_data_set_int(irl_settings, "timeout_sec", (context->latency / 1000) + 5);
+		obs_data_set_int(irl_settings, "timeout", (context->latency + 5000) * 1000);
+		obs_data_set_int(irl_settings, "connect_timeout", (context->latency + 5000) * 1000);
 		
 		// SRT and RIST already handle the huge network latency buffer.
 		// We only need a small buffer in irl_source to absorb local decode/IPC jitter.
@@ -421,17 +443,18 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		obs_data_set_bool(irl_settings, "close_when_inactive", false);
 		char ffmpeg_opts[256];
 		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
-			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=90000000");
+			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=%d", 
+			(context->latency + 5000) * 1000);
 		obs_data_set_string(irl_settings, "ffmpeg_options", ffmpeg_opts);
 
 		new_media = obs_source_create_private("irl_source", source_name, irl_settings);
 		obs_data_release(irl_settings);
 
 		if (!new_media) {
-			obs_log(LOG_WARNING, "[SRTLA] IRL Source creation failed (is obs-irl-source plugin installed?). Falling back to FFmpeg.");
+			obs_log(LOG_WARNING, "[RIST] IRL Source creation failed (is obs-irl-source plugin installed?). Falling back to FFmpeg.");
 			use_irl_source = false;
 		} else {
-			obs_log(LOG_INFO, "[SRTLA] Created internal irl_source successfully (Perfect A/V Sync)");
+			obs_log(LOG_INFO, "[RIST] Created internal irl_source successfully (Perfect A/V Sync)");
 		}
 	} else if (use_vlc) {
 		obs_data_t *vlc_settings = obs_data_create();
@@ -439,7 +462,7 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		obs_data_t *item = obs_data_create();
 		
 		char vlc_url[256];
-		strncpy(vlc_url, url, sizeof(vlc_url));
+		snprintf(vlc_url, sizeof(vlc_url), "udp://@127.0.0.1:%d", context->local_srt_port);
 		
 		obs_data_set_string(item, "value", vlc_url);
 		obs_data_array_push_back(playlist, item);
@@ -460,10 +483,10 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		obs_data_release(vlc_settings);
 
 		if (!new_media) {
-			obs_log(LOG_WARNING, "[SRTLA] VLC Video Source creation failed (is 64-bit VLC installed?). Falling back to FFmpeg.");
+			obs_log(LOG_WARNING, "[RIST] VLC Video Source creation failed (is 64-bit VLC installed?). Falling back to FFmpeg.");
 			use_vlc = false;
 		} else {
-			obs_log(LOG_INFO, "[SRTLA] Created internal vlc_source successfully (low-latency network caching 0ms)");
+			obs_log(LOG_INFO, "[RIST] Created internal vlc_source successfully (low-latency network caching 0ms)");
 		}
 	}
 
@@ -487,9 +510,9 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		obs_data_release(media_settings);
 
 		if (new_media) {
-			obs_log(LOG_INFO, "[SRTLA] Created internal ffmpeg_source successfully (live continuous playback)");
+			obs_log(LOG_INFO, "[RIST] Created internal ffmpeg_source successfully (live continuous playback)");
 		} else {
-			obs_log(LOG_ERROR, "[SRTLA] Failed to create internal ffmpeg_source");
+			obs_log(LOG_ERROR, "[RIST] Failed to create internal ffmpeg_source");
 		}
 	}
 
@@ -510,7 +533,7 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		}
 
 		// Always capture audio for DB meter calculations
-		obs_source_add_audio_capture_callback(new_media, srtla_audio_capture_cb, context);
+		obs_source_add_audio_capture_callback(new_media, rist_audio_capture_cb, context);
 
 		// Keep media source permanently active in background so stream continues receiving across scenes
 		obs_source_inc_active(new_media);
@@ -520,14 +543,14 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 	return new_media;
 }
 
-void srtla_reload_media_source(void *data)
+void rist_reload_media_source(void *data)
 {
 #ifdef _WIN32
 	__try {
 #endif
-		struct srtla_source *context = data;
+		struct rist_source *context = data;
 		if (!context) return;
-		obs_log(LOG_INFO, "[SRTLA] Reloading internal media player for port %d to resync stream...", context->listen_port);
+		obs_log(LOG_INFO, "[RIST] Reloading internal media player for port %d to resync stream...", context->listen_port);
 		
 		obs_source_t *old_media = context->media_source;
 		
@@ -536,28 +559,28 @@ void srtla_reload_media_source(void *data)
 		obs_leave_graphics();
 		
 		if (old_media) {
-			srtla_destroy_media_source_internal(context, old_media);
+			rist_destroy_media_source_internal(context, old_media);
 		}
 
 		// Allow time for the previous media source to fully close its UDP ports
 		os_sleep_ms(250);
 
-		obs_source_t *new_media = srtla_create_media_source_internal(context);
+		obs_source_t *new_media = rist_create_media_source_internal(context);
 		
 		obs_enter_graphics();
 		context->media_source = new_media;
 		obs_leave_graphics();
 #ifdef _WIN32
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
-		obs_log(LOG_ERROR, "[SRTLA] SEH Exception caught in srtla_reload_media_source! OBS crash prevented.");
+		obs_log(LOG_ERROR, "[RIST] SEH Exception caught in rist_reload_media_source! OBS crash prevented.");
 	}
 #endif
 }
 
-static void srtla_source_destroy(void *data)
+static void rist_source_destroy(void *data)
 {
-	struct srtla_source *context = data;
-	srtla_stop_thread(context);
+	struct rist_source *context = data;
+	rist_stop_thread(context);
 	obs_source_t *old_media = context->media_source;
 	
 	obs_enter_graphics();
@@ -565,11 +588,11 @@ static void srtla_source_destroy(void *data)
 	obs_leave_graphics();
 	
 	if (old_media) {
-		srtla_destroy_media_source_internal(context, old_media);
+		rist_destroy_media_source_internal(context, old_media);
 	}
 
 	pthread_mutex_lock(&sources_mutex);
-	struct srtla_source **curr = &sources_head;
+	struct rist_source **curr = &sources_head;
 	while (*curr) {
 		if (*curr == context) {
 			*curr = context->next;
@@ -581,32 +604,47 @@ static void srtla_source_destroy(void *data)
 
 	bfree(context->playback_engine);
 	bfree(context->listen_ip);
+	bfree(context->rist_passphrase);
 	bfree(context);
 }
 
-static void *srtla_thread_func(void *data)
+static void *rist_thread_func(void *data)
 {
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 
 	// Wait a bit to ensure media source is listening
 	os_sleep_ms(500);
 
-	obs_log(LOG_INFO, "[SRTLA] Starting srtla_rec thread on IP %s, port %d, proxying to 127.0.0.1:%d",
-		context->listen_ip ? context->listen_ip : "ANY", context->listen_port, context->local_srt_port);
+	obs_log(LOG_INFO, "[RIST] Starting RIST receiver on IP %s, port %d", 
+		context->listen_ip ? context->listen_ip : "ANY", context->listen_port);
+		
+	struct rist_config r_cfg = {0};
+	if (context->listen_ip) {
+		strncpy(r_cfg.listen_ip, context->listen_ip, sizeof(r_cfg.listen_ip) - 1);
+	}
+	r_cfg.listen_port = context->listen_port;
+	r_cfg.local_srt_port = context->local_srt_port;
+	r_cfg.stop_flag = &context->stop_flag;
+	r_cfg.profile = context->rist_profile;
+	r_cfg.buffer_ms = context->latency;
+	if (context->rist_passphrase) {
+		strncpy(r_cfg.passphrase, context->rist_passphrase, sizeof(r_cfg.passphrase) - 1);
+	}
+	r_cfg.key_size = context->rist_key_size;
+	r_cfg.stream_id = context->rist_stream_id;
 
-	srtla_rec_main(context->listen_ip, context->listen_port, "127.0.0.1", context->local_srt_port,
-		       &context->stop_flag);
+	rist_rec_main(&r_cfg);
 
-	obs_log(LOG_INFO, "[SRTLA] receiver thread exited");
+	obs_log(LOG_INFO, "[RIST] receiver thread exited");
 	return NULL;
 }
 
-static void srtla_source_update(void *data, obs_data_t *settings)
+static void rist_source_update(void *data, obs_data_t *settings)
 {
 #ifdef _WIN32
 	__try {
 #endif
-		struct srtla_source *context = data;
+		struct rist_source *context = data;
 
 		long long new_listen_port = obs_data_get_int(settings, "listen_port");
 		long long new_local_srt_port = obs_data_get_int(settings, "local_srt_port");
@@ -620,7 +658,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			while (true) {
 				bool conflict = false;
 				pthread_mutex_lock(&sources_mutex);
-				for (struct srtla_source *s = sources_head; s; s = s->next) {
+				for (struct rist_source *s = sources_head; s; s = s->next) {
 					if (s != context && s->listen_port == new_listen_port) {
 						conflict = true;
 						break;
@@ -636,7 +674,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			// Prevent user from changing to an already occupied port
 			bool conflict = false;
 			pthread_mutex_lock(&sources_mutex);
-			for (struct srtla_source *s = sources_head; s; s = s->next) {
+			for (struct rist_source *s = sources_head; s; s = s->next) {
 				if (s != context && s->listen_port == new_listen_port) {
 					conflict = true;
 					break;
@@ -646,7 +684,7 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 
 			if (conflict) {
 				obs_log(LOG_WARNING,
-					"[SRTLA] Port %d is already in use by another SRTLA source! Reverting.",
+					"[RIST] Port %d is already in use by another RIST source! Reverting.",
 					new_listen_port);
 				obs_data_set_int(settings, "listen_port", context->listen_port);
 				new_listen_port = context->listen_port; // prevent restart
@@ -673,9 +711,16 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 		}
 
 		bool config_changed = false;
+		const char *new_passphrase = obs_data_get_string(settings, "rist_passphrase");
 		int new_latency = (int)obs_data_get_int(settings, "latency");
 		if (new_latency <= 0) new_latency = 2000;
 		if (context->latency != new_latency) config_changed = true;
+
+		if (context->rist_profile != obs_data_get_int(settings, "rist_profile")) config_changed = true;
+		if (context->rist_key_size != obs_data_get_int(settings, "rist_key_size")) config_changed = true;
+		if (context->rist_stream_id != obs_data_get_int(settings, "rist_stream_id")) config_changed = true;
+		if (new_passphrase && (!context->rist_passphrase || strcmp(context->rist_passphrase, new_passphrase) != 0)) config_changed = true;
+		else if (!new_passphrase && context->rist_passphrase) config_changed = true;
 
 		bool hw_decode_changed = (context->hw_decode != obs_data_get_bool(settings, "hw_decode"));
 
@@ -685,11 +730,17 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 					      !context->thread_running);
 
 		if (thread_restart_needed || media_restart_needed) {
-			srtla_stop_thread(context);
+			rist_stop_thread(context);
 			context->auto_reset_count = 0;
+			context->rist_profile = (int)obs_data_get_int(settings, "rist_profile");
+			context->rist_key_size = (int)obs_data_get_int(settings, "rist_key_size");
+			context->rist_stream_id = (int)obs_data_get_int(settings, "rist_stream_id");
 			
 			context->latency = new_latency;
 			context->hw_decode = obs_data_get_bool(settings, "hw_decode");
+
+			if (context->rist_passphrase) bfree(context->rist_passphrase);
+			context->rist_passphrase = new_passphrase ? bstrdup(new_passphrase) : NULL;
 
 			context->listen_port = (int)new_listen_port;
 			context->local_srt_port = (int)new_local_srt_port;
@@ -698,25 +749,25 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 			context->listen_ip = new_listen_ip ? bstrdup(new_listen_ip) : NULL;
 
 			if (media_restart_needed) {
-				srtla_reload_media_source(context);
+				rist_reload_media_source(context);
 			}
 
 			context->stop_flag = 0;
-			if (pthread_create(&context->srtla_thread, NULL, srtla_thread_func, context) == 0) {
+			if (pthread_create(&context->rist_thread, NULL, rist_thread_func, context) == 0) {
 				context->thread_running = true;
 			}
 		}
 #ifdef _WIN32
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
-		obs_log(LOG_ERROR, "[SRTLA] SEH Exception caught in srtla_source_update! OBS crash prevented.");
+		obs_log(LOG_ERROR, "[RIST] SEH Exception caught in rist_source_update! OBS crash prevented.");
 	}
 #endif
 }
 
-static void srtla_source_video_render(void *data, gs_effect_t *effect)
+static void rist_source_video_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 	
 	if (context->media_source) {
 		obs_source_video_render(context->media_source);
@@ -730,41 +781,41 @@ static void srtla_source_video_render(void *data, gs_effect_t *effect)
 	}
 }
 
-static uint32_t srtla_source_get_width(void *data)
+static uint32_t rist_source_get_width(void *data)
 {
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 	return context->media_source ? obs_source_get_base_width(context->media_source) : 0;
 }
 
-static uint32_t srtla_source_get_height(void *data)
+static uint32_t rist_source_get_height(void *data)
 {
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 	return context->media_source ? obs_source_get_base_height(context->media_source) : 0;
 }
 
-static void srtla_source_activate(void *data)
+static void rist_source_activate(void *data)
 {
 	UNUSED_PARAMETER(data);
 }
 
-static void srtla_source_deactivate(void *data)
+static void rist_source_deactivate(void *data)
 {
 	UNUSED_PARAMETER(data);
 }
 
-static void srtla_source_show(void *data)
+static void rist_source_show(void *data)
 {
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 	if (context->media_source) obs_source_inc_showing(context->media_source);
 }
 
-static void srtla_source_hide(void *data)
+static void rist_source_hide(void *data)
 {
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 	if (context->media_source) obs_source_dec_showing(context->media_source);
 }
 
-static obs_properties_t *srtla_source_get_properties(void *data)
+static obs_properties_t *rist_source_get_properties(void *data)
 {
 	UNUSED_PARAMETER(data);
 	obs_properties_t *props = obs_properties_create();
@@ -777,32 +828,48 @@ static obs_properties_t *srtla_source_get_properties(void *data)
 
 	obs_properties_add_bool(props, "hw_decode", "Hardware Decoding");
 
-	obs_properties_add_text(props, "listen_ip", "SRTLA Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
-	obs_properties_add_int(props, "listen_port", "SRTLA Listen Port (UDP)", 1, 65535, 1);
+	obs_properties_add_text(props, "listen_ip", "RIST Bind IP (empty for ANY)", OBS_TEXT_DEFAULT);
+	obs_properties_add_int(props, "listen_port", "RIST Listen Port (UDP)", 1, 65535, 1);
 	obs_properties_add_int(props, "latency", "Latency/Buffer (ms)", 100, 30000, 100);
+	
+	obs_property_t *prof_list = obs_properties_add_list(props, "rist_profile", "RIST Profile", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(prof_list, "Simple", 0);
+	obs_property_list_add_int(prof_list, "Main", 1);
+	obs_property_list_add_int(prof_list, "Advanced", 2);
+	
+	obs_property_t *key_list = obs_properties_add_list(props, "rist_key_size", "RIST Key Size", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(key_list, "128", 128);
+	obs_property_list_add_int(key_list, "256", 256);
+	obs_properties_add_int(props, "rist_stream_id", "RIST Stream ID (0 for default)", 0, 65535, 1);
 
 	return props;
 }
 
-static void srtla_source_get_defaults(obs_data_t *settings)
+static void rist_source_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_string(settings, "playback_engine", "irl_source");
 	obs_data_set_default_string(settings, "listen_ip", "");
 	obs_data_set_default_bool(settings, "hw_decode", true);
 	obs_data_set_default_int(settings, "listen_port", 5000);
 	obs_data_set_default_int(settings, "latency", 4000);
+	
+	obs_data_set_default_int(settings, "rist_profile", 1);
+
+	obs_data_set_default_string(settings, "rist_passphrase", "");
+	obs_data_set_default_int(settings, "rist_key_size", 128);
+	obs_data_set_default_int(settings, "rist_stream_id", 0);
 }
 
-static void srtla_source_video_tick(void *data, float seconds)
+static void rist_source_video_tick(void *data, float seconds)
 {
 	UNUSED_PARAMETER(seconds);
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 	
 	if (context) {
 		uint64_t now = os_gettime_ns();
 		if (context->needs_reload) {
 			context->needs_reload = false;
-			srtla_reload_media_source(context);
+			rist_reload_media_source(context);
 		}
 
 		if (now - context->last_audio_time > 100000000ULL) {
@@ -812,42 +879,41 @@ static void srtla_source_video_tick(void *data, float seconds)
 	}
 }
 
-struct obs_source_info srtla_source_info = {
-	.id = "srtla_source",
+struct obs_source_info rist_source_info = {
+	.id = "rist_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
 	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO | OBS_SOURCE_CUSTOM_DRAW |
 			OBS_SOURCE_DO_NOT_DUPLICATE,
-	.get_name = srtla_source_get_name,
-	.create = srtla_source_create,
-	.destroy = srtla_source_destroy,
-	.update = srtla_source_update,
-	.get_properties = srtla_source_get_properties,
-	.get_defaults = srtla_source_get_defaults,
-	.activate = srtla_source_activate,
-	.deactivate = srtla_source_deactivate,
-	.show = srtla_source_show,
-	.hide = srtla_source_hide,
-	.video_render = srtla_source_video_render,
-	.video_tick = srtla_source_video_tick,
-	.get_width = srtla_source_get_width,
-	.get_height = srtla_source_get_height,
+	.get_name = rist_source_get_name,
+	.create = rist_source_create,
+	.destroy = rist_source_destroy,
+	.update = rist_source_update,
+	.get_properties = rist_source_get_properties,
+	.get_defaults = rist_source_get_defaults,
+	.activate = rist_source_activate,
+	.deactivate = rist_source_deactivate,
+	.show = rist_source_show,
+	.hide = rist_source_hide,
+	.video_render = rist_source_video_render,
+	.video_tick = rist_source_video_tick,
+	.get_width = rist_source_get_width,
+	.get_height = rist_source_get_height,
 };
 
-void srtla_force_stop(void *data)
+void rist_force_stop(void *data)
 {
 #ifdef _WIN32
 	__try {
 #endif
-		struct srtla_source *context = data;
+		struct rist_source *context = data;
 		if (context) {
-			srtla_stop_thread(context);
-			srtla_reset_group_by_port(context->listen_port);
+			rist_stop_thread(context);
 			obs_source_t *old_media = context->media_source;
 			obs_enter_graphics();
 			context->media_source = NULL;
 			obs_leave_graphics();
 			if (old_media) {
-				srtla_destroy_media_source_internal(context, old_media);
+				rist_destroy_media_source_internal(context, old_media);
 			}
 			context->was_connected = false;
 			context->connected_since = 0;
@@ -863,101 +929,101 @@ void srtla_force_stop(void *data)
 		}
 #ifdef _WIN32
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
-		obs_log(LOG_ERROR, "[SRTLA] SEH Exception caught in srtla_force_stop! OBS crash prevented.");
+		obs_log(LOG_ERROR, "[RIST] SEH Exception caught in rist_force_stop! OBS crash prevented.");
 	}
 #endif
 }
 
-void srtla_force_start(void *data)
+void rist_force_start(void *data)
 {
-	struct srtla_source *context = data;
+	struct rist_source *context = data;
 	obs_data_t *settings = obs_source_get_settings(context->source);
-	srtla_source_update(context, settings);
+	rist_source_update(context, settings);
 	obs_data_release(settings);
 }
 
-void srtla_force_stop_all()
+void rist_force_stop_all()
 {
-	struct srtla_source **targets = NULL;
+	struct rist_source **targets = NULL;
 	int count = 0;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next)
+	for (struct rist_source *s = sources_head; s; s = s->next)
 		count++;
 	if (count > 0) {
-		targets = calloc(count, sizeof(struct srtla_source *));
+		targets = calloc(count, sizeof(struct rist_source *));
 		int i = 0;
-		for (struct srtla_source *s = sources_head; s; s = s->next) {
+		for (struct rist_source *s = sources_head; s; s = s->next) {
 			targets[i++] = s;
 		}
 	}
 	pthread_mutex_unlock(&sources_mutex);
 
 	for (int i = 0; i < count; i++) {
-		srtla_force_stop(targets[i]);
+		rist_force_stop(targets[i]);
 	}
 	free(targets);
 }
 
-void srtla_force_start_all()
+void rist_force_start_all()
 {
-	struct srtla_source **targets = NULL;
+	struct rist_source **targets = NULL;
 	int count = 0;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next)
+	for (struct rist_source *s = sources_head; s; s = s->next)
 		count++;
 	if (count > 0) {
-		targets = calloc(count, sizeof(struct srtla_source *));
+		targets = calloc(count, sizeof(struct rist_source *));
 		int i = 0;
-		for (struct srtla_source *s = sources_head; s; s = s->next) {
+		for (struct rist_source *s = sources_head; s; s = s->next) {
 			targets[i++] = s;
 		}
 	}
 	pthread_mutex_unlock(&sources_mutex);
 
 	for (int i = 0; i < count; i++) {
-		srtla_force_start(targets[i]);
+		rist_force_start(targets[i]);
 	}
 	free(targets);
 }
 
-void srtla_force_restart_all()
+void rist_force_restart_all()
 {
-	struct srtla_source **targets = NULL;
+	struct rist_source **targets = NULL;
 	int count = 0;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next)
+	for (struct rist_source *s = sources_head; s; s = s->next)
 		count++;
 	if (count > 0) {
-		targets = calloc(count, sizeof(struct srtla_source *));
+		targets = calloc(count, sizeof(struct rist_source *));
 		int i = 0;
-		for (struct srtla_source *s = sources_head; s; s = s->next) {
+		for (struct rist_source *s = sources_head; s; s = s->next) {
 			targets[i++] = s;
 		}
 	}
 	pthread_mutex_unlock(&sources_mutex);
 
 	for (int i = 0; i < count; i++) {
-		srtla_force_stop(targets[i]);
-		srtla_force_start(targets[i]);
+		rist_force_stop(targets[i]);
+		rist_force_start(targets[i]);
 	}
 	free(targets);
 }
 
-void srtla_auto_recover_hung_sources()
+void rist_auto_recover_hung_sources()
 {
-	struct srtla_source **reload_targets = NULL;
+	struct rist_source **reload_targets = NULL;
 	int reload_count = 0;
 	
-	struct srtla_source **restart_targets = NULL;
+	struct rist_source **restart_targets = NULL;
 	int restart_count = 0;
 	
 	uint64_t now = os_gettime_ns();
 
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next) {
+	for (struct rist_source *s = sources_head; s; s = s->next) {
 		if (!s->thread_running) continue;
 		
-		int groups = srtla_get_group_count_by_port(s->listen_port);
+		int groups = rist_get_peer_count_by_port(s->listen_port);
 		if (groups > 0) {
 			if (s->connected_since == 0) {
 				s->connected_since = now;
@@ -969,10 +1035,13 @@ void srtla_auto_recover_hung_sources()
 			bool in_cooldown = (s->last_recovery_time > 0 && (now - s->last_recovery_time < 10000000000ULL));
 
 			// Condition A: Video has been rendering for >= 12s, but zero audio packets ever arrived
-			bool missing_on_connect = false;
+			bool missing_on_connect = (s->last_audio_time == 0 && s->last_video_time > 0 &&
+						   (now - s->connected_since >= 12000000000ULL) &&
+						   (now - s->last_video_time < 2000000000ULL));
 
 			// Condition B: Audio was receiving normally, but completely stopped for >= 8s while video is still active
-			bool audio_dropped = false;
+			bool audio_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time >= 8000000000ULL) &&
+					      s->last_video_time > 0 && (now - s->last_video_time < 2000000000ULL));
 
 			// Condition C: Audio severely starved (< 30kHz) continuously for >= 6s
 			bool audio_starved = false;
@@ -993,7 +1062,8 @@ void srtla_auto_recover_hung_sources()
 			s->drift_since = 0;
 
 			// Condition D: Audio is receiving normally, but video has completely stopped for >= 8s
-			bool video_dropped = false;
+			bool video_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) &&
+					      s->last_video_time > 0 && (now - s->last_video_time >= 8000000000ULL));
 
 			// Only attempt auto-recovery up to 2 times to avoid looping on video-only or mic-less streams
 			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved || video_dropped || severe_audio_drift)) {
@@ -1005,23 +1075,23 @@ void srtla_auto_recover_hung_sources()
 
 				if (missing_on_connect) {
 					obs_log(LOG_WARNING,
-						"[SRTLA] Port %d video active for >12s but no audio received! Auto-reloading media player (attempt %d/2).",
+						"[RIST] Port %d video active for >12s but no audio received! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, s->recovery_attempts);
 				} else if (audio_dropped) {
 					obs_log(LOG_WARNING,
-						"[SRTLA] Port %d audio stopped for >8s while video active! Auto-reloading media player (attempt %d/2).",
+						"[RIST] Port %d audio stopped for >8s while video active! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, s->recovery_attempts);
 				} else if (video_dropped) {
 					obs_log(LOG_WARNING,
-						"[SRTLA] Port %d video stopped for >8s while audio active! Auto-reloading media player (attempt %d/2).",
+						"[RIST] Port %d video stopped for >8s while audio active! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, s->recovery_attempts);
 				} else if (severe_audio_drift) {
 					obs_log(LOG_WARNING,
-						"[SRTLA] Port %d severe audio drift detected (%lld ms)! Auto-reloading media player (attempt %d/2).",
+						"[RIST] Port %d severe audio drift detected (%lld ms)! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, (long long)(s->current_audio_drift / 1000000LL), s->recovery_attempts);
 				} else {
 					obs_log(LOG_WARNING,
-						"[SRTLA] Port %d audio starved (%.1f Hz < 30kHz) for >6s! Auto-reloading media player (attempt %d/2).",
+						"[RIST] Port %d audio starved (%.1f Hz < 30kHz) for >6s! Auto-reloading media player (attempt %d/2).",
 						s->listen_port, s->current_stream_hz, s->recovery_attempts);
 				}
 				s->pending_recovery = RECOVERY_RELOAD;
@@ -1045,9 +1115,9 @@ void srtla_auto_recover_hung_sources()
 	}
 	
 	if (restart_count > 0) {
-		restart_targets = calloc(restart_count, sizeof(struct srtla_source *));
+		restart_targets = calloc(restart_count, sizeof(struct rist_source *));
 		int i = 0;
-		for (struct srtla_source *s = sources_head; s; s = s->next) {
+		for (struct rist_source *s = sources_head; s; s = s->next) {
 			if (s->pending_recovery == RECOVERY_RESTART) {
 				restart_targets[i++] = s;
 				s->pending_recovery = RECOVERY_NONE;
@@ -1056,9 +1126,9 @@ void srtla_auto_recover_hung_sources()
 	}
 
 	if (reload_count > 0) {
-		reload_targets = calloc(reload_count, sizeof(struct srtla_source *));
+		reload_targets = calloc(reload_count, sizeof(struct rist_source *));
 		int i = 0;
-		for (struct srtla_source *s = sources_head; s; s = s->next) {
+		for (struct rist_source *s = sources_head; s; s = s->next) {
 			if (s->pending_recovery == RECOVERY_RELOAD) {
 				reload_targets[i++] = s;
 				s->pending_recovery = RECOVERY_NONE;
@@ -1069,28 +1139,28 @@ void srtla_auto_recover_hung_sources()
 
 	for (int i = 0; i < restart_count; i++) {
 		if (restart_targets[i]) {
-			srtla_force_stop(restart_targets[i]);
-			srtla_force_start(restart_targets[i]);
+			rist_force_stop(restart_targets[i]);
+			rist_force_start(restart_targets[i]);
 		}
 	}
 	if (restart_targets) free(restart_targets);
 
 	for (int i = 0; i < reload_count; i++) {
 		if (reload_targets[i]) {
-			srtla_reload_media_source(reload_targets[i]);
+			rist_reload_media_source(reload_targets[i]);
 		}
 	}
 	if (reload_targets) free(reload_targets);
 }
 
-void srtla_get_all_receivers_json(char *out_buffer, int max_len)
+void rist_get_all_receivers_json(char *out_buffer, int max_len)
 {
 	int offset = 0;
 	if (out_buffer && max_len > 0) {
 		offset += snprintf(out_buffer + offset, max_len - offset, "[");
 		bool first = true;
 		pthread_mutex_lock(&sources_mutex);
-		for (struct srtla_source *s = sources_head; s; s = s->next) {
+		for (struct rist_source *s = sources_head; s; s = s->next) {
 			if (!first)
 				offset += snprintf(out_buffer + offset, max_len - offset, ",");
 			first = false;
@@ -1099,24 +1169,24 @@ void srtla_get_all_receivers_json(char *out_buffer, int max_len)
 					   "{\"name\":\"%s\",\"listen_port\":%d,\"running\":%s,\"protocol\":\"%s\",\"audio_drift_ms\":%lld,\"audio_db\":%.1f,\"auto_reset_count\":%d,\"audio_starved\":%s}",
 					   name ? name : "Unknown", s->listen_port,
 					   s->thread_running ? "true" : "false",
-					   "srtla",
+					   "rist",
 					   (long long)(s->current_audio_drift / 1000000LL),
 					   s->current_audio_db,
 					   s->auto_reset_count,
-					   srtla_is_audio_starved_locked(s) ? "true" : "false");
+					   rist_is_audio_starved_locked(s) ? "true" : "false");
 		}
 		pthread_mutex_unlock(&sources_mutex);
 		snprintf(out_buffer + offset, max_len - offset, "]");
 	}
 }
 
-void srtla_force_start_by_name(const char *name)
+void rist_force_start_by_name(const char *name)
 {
 	if (!name)
 		return;
-	struct srtla_source *target = NULL;
+	struct rist_source *target = NULL;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next) {
+	for (struct rist_source *s = sources_head; s; s = s->next) {
 		const char *s_name = obs_source_get_name(s->source);
 		if (s_name && strcmp(s_name, name) == 0) {
 			target = s;
@@ -1126,17 +1196,17 @@ void srtla_force_start_by_name(const char *name)
 	pthread_mutex_unlock(&sources_mutex);
 
 	if (target) {
-		srtla_force_start(target);
+		rist_force_start(target);
 	}
 }
 
-void srtla_force_stop_by_name(const char *name)
+void rist_force_stop_by_name(const char *name)
 {
 	if (!name)
 		return;
-	struct srtla_source *target = NULL;
+	struct rist_source *target = NULL;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next) {
+	for (struct rist_source *s = sources_head; s; s = s->next) {
 		const char *s_name = obs_source_get_name(s->source);
 		if (s_name && strcmp(s_name, name) == 0) {
 			target = s;
@@ -1146,17 +1216,17 @@ void srtla_force_stop_by_name(const char *name)
 	pthread_mutex_unlock(&sources_mutex);
 
 	if (target) {
-		srtla_force_stop(target);
+		rist_force_stop(target);
 	}
 }
 
-void srtla_force_restart_by_name(const char *name)
+void rist_force_restart_by_name(const char *name)
 {
 	if (!name)
 		return;
-	struct srtla_source *target = NULL;
+	struct rist_source *target = NULL;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next) {
+	for (struct rist_source *s = sources_head; s; s = s->next) {
 		const char *s_name = obs_source_get_name(s->source);
 		if (s_name && strcmp(s_name, name) == 0) {
 			target = s;
@@ -1166,18 +1236,18 @@ void srtla_force_restart_by_name(const char *name)
 	pthread_mutex_unlock(&sources_mutex);
 
 	if (target) {
-		srtla_force_stop(target);
-		srtla_force_start(target);
+		rist_force_stop(target);
+		rist_force_start(target);
 	}
 }
 
-void srtla_force_reload_by_name(const char *name)
+void rist_force_reload_by_name(const char *name)
 {
 	if (!name)
 		return;
-	struct srtla_source *target = NULL;
+	struct rist_source *target = NULL;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next) {
+	for (struct rist_source *s = sources_head; s; s = s->next) {
 		const char *s_name = obs_source_get_name(s->source);
 		if (s_name && strcmp(s_name, name) == 0) {
 			target = s;
@@ -1187,21 +1257,21 @@ void srtla_force_reload_by_name(const char *name)
 	pthread_mutex_unlock(&sources_mutex);
 
 	if (target) {
-		srtla_reload_media_source(target);
+		rist_reload_media_source(target);
 	}
 }
 
-void srtla_force_reload_all()
+void rist_force_reload_all()
 {
-	struct srtla_source **targets = NULL;
+	struct rist_source **targets = NULL;
 	int count = 0;
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next)
+	for (struct rist_source *s = sources_head; s; s = s->next)
 		count++;
 	if (count > 0) {
-		targets = calloc(count, sizeof(struct srtla_source *));
+		targets = calloc(count, sizeof(struct rist_source *));
 		int i = 0;
-		for (struct srtla_source *s = sources_head; s; s = s->next) {
+		for (struct rist_source *s = sources_head; s; s = s->next) {
 			targets[i++] = s;
 		}
 	}
@@ -1209,16 +1279,16 @@ void srtla_force_reload_all()
 
 	for (int i = 0; i < count; i++) {
 		if (targets[i]) {
-			srtla_reload_media_source(targets[i]);
+			rist_reload_media_source(targets[i]);
 		}
 	}
 	free(targets);
 }
 
-void srtla_populate_receivers_list(obs_property_t *p) {
+void rist_populate_receivers_list(obs_property_t *p) {
 	obs_property_list_clear(p);
 	pthread_mutex_lock(&sources_mutex);
-	for (struct srtla_source *s = sources_head; s; s = s->next) {
+	for (struct rist_source *s = sources_head; s; s = s->next) {
 		const char *name = obs_source_get_name(s->source);
 		char port_str[32];
 		snprintf(port_str, sizeof(port_str), "%d", s->listen_port);

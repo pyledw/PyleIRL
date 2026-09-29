@@ -172,7 +172,7 @@
         <div class="tab" onclick="switchTab('settings')">Plugin Settings</div>
         <div class="tab" onclick="switchTab('obs-settings')">OBS Settings</div>
         <div class="tab" onclick="switchTab('multistream')">Multistream</div>
-        <div class="tab" onclick="switchTab('monitor')">SRTLA Monitor</div>
+        <div class="tab" onclick="switchTab('monitor')">Receiver Monitor</div>
     </div>
 
     <!-- DASHBOARD TAB -->
@@ -221,7 +221,7 @@
         </div>
         
         <div class="panel" id="srtla-stats-panel">
-            <h2>SRTLA Live Stats</h2>
+            <h2>Live Connection Stats</h2>
             <div id="srtla-stats-container" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:15px;">
                 <div style="color:var(--text-muted); font-style:italic;">No active connections.</div>
             </div>
@@ -476,7 +476,7 @@
     <!-- MONITOR TAB -->
     <div id="tab-monitor" class="tab-content">
         <div class="panel">
-            <h2>SRTLA Receivers</h2>
+            <h2>SRTLA & RIST Receivers</h2>
             <table id="receivers-table">
                 <tr><th>Name</th><th>Port</th><th>Status</th><th>Actions</th></tr>
             </table>

@@ -91,7 +91,7 @@ typedef enum {
 #endif
 
 #ifndef CONN_DEAD_NO_ACTIVITY_MS
-#define CONN_DEAD_NO_ACTIVITY_MS 5000
+#define CONN_DEAD_NO_ACTIVITY_MS 90000
 #endif
 
 /* Helper for more explanatory socket error strings */

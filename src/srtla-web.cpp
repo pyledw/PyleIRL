@@ -30,6 +30,10 @@ void srtla_force_restart_all();
 
 void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
 void rist_get_connection_details(char *out_buffer, int max_len);
+void rist_get_all_receivers_json(char *out_buffer, int max_len);
+void rist_force_start_by_name(const char *name);
+void rist_force_stop_by_name(const char *name);
+void rist_force_restart_by_name(const char *name);
 }
 
 static httplib::Server *svr = nullptr;
@@ -587,7 +591,34 @@ static void handle_api_receivers(const httplib::Request &req, httplib::Response 
 {
 	char buf[4096] = {0};
 	srtla_get_all_receivers_json(buf, sizeof(buf));
-	res.set_content(buf, "application/json");
+	
+	char rist_buf[4096] = {0};
+	rist_get_all_receivers_json(rist_buf, sizeof(rist_buf));
+
+	QJsonDocument doc = QJsonDocument::fromJson(QByteArray(buf));
+	QJsonDocument ristDoc = QJsonDocument::fromJson(QByteArray(rist_buf));
+	
+	QJsonArray outArr;
+	if (doc.isArray()) {
+		QJsonArray arr = doc.array();
+		for (int i = 0; i < arr.size(); i++) {
+			QJsonObject obj = arr[i].toObject();
+			obj["protocol"] = "SRTLA";
+			outArr.append(obj);
+		}
+	}
+	
+	if (ristDoc.isArray()) {
+		QJsonArray arr = ristDoc.array();
+		for (int i = 0; i < arr.size(); i++) {
+			QJsonObject obj = arr[i].toObject();
+			obj["protocol"] = "RIST";
+			outArr.append(obj);
+		}
+	}
+
+	QJsonDocument mergedDoc(outArr);
+	res.set_content(mergedDoc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
 }
 
 static void handle_api_stats(const httplib::Request &req, httplib::Response &res)
@@ -647,12 +678,16 @@ static void handle_api_receiver_action(const httplib::Request &req, httplib::Res
 		QString name = doc.object()["name"].toString();
 		QByteArray nameBA = name.toUtf8();
 
-		if (action == "start")
+		if (action == "start") {
 			srtla_force_start_by_name(nameBA.constData());
-		else if (action == "stop")
+			rist_force_start_by_name(nameBA.constData());
+		} else if (action == "stop") {
 			srtla_force_stop_by_name(nameBA.constData());
-		else if (action == "restart")
+			rist_force_stop_by_name(nameBA.constData());
+		} else if (action == "restart") {
 			srtla_force_restart_by_name(nameBA.constData());
+			rist_force_restart_by_name(nameBA.constData());
+		}
 
 		res.set_content("{\"status\":\"ok\"}", "application/json");
 		return;

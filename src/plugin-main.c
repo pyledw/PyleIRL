@@ -28,6 +28,7 @@ OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
 extern struct obs_source_info srtla_source_info;
+extern struct obs_source_info rist_source_info;
 
 extern void *create_srtla_dock();
 extern void *create_srtla_multistream_dock();
@@ -77,6 +78,7 @@ bool obs_module_load(void)
 	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
 	srtla_init_log_handler();
 	register_source_compat(&srtla_source_info);
+	register_source_compat(&rist_source_info);
 	register_source_compat(&srtla_stats_filter_info);
 	obs_frontend_add_event_callback(frontend_event_cb, NULL);
 	return true;

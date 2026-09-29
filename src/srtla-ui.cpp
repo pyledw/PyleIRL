@@ -41,10 +41,16 @@ void srtla_force_reload_all();
 char *srtla_get_frpc_path(void);
 bool srtla_is_audio_starved(int listen_port);
 extern "C" bool srtla_is_media_playing(int listen_port);
+extern "C" bool rist_is_media_playing(int listen_port);
 void srtla_auto_recover_hung_sources();
 
 void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
 void rist_get_connection_details(char *out_buffer, int max_len);
+void rist_get_all_receivers_json(char *out_buffer, int max_len);
+void rist_force_start_by_name(const char *name);
+void rist_force_stop_by_name(const char *name);
+void rist_force_restart_by_name(const char *name);
+void rist_force_reload_by_name(const char *name);
 }
 
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("Bonding Status", parent)
@@ -200,12 +206,26 @@ void SrtlaStatusWidget::updateStatus()
 		connections += rist_conns;
 
 		srtla_get_all_receivers_json(receivers_buffer, sizeof(receivers_buffer));
+		char rist_receivers_buffer[4096] = {0};
+		rist_get_all_receivers_json(rist_receivers_buffer, sizeof(rist_receivers_buffer));
 
 		double totalBitrateKbps = 0.0;
 
 		QJsonDocument rDoc = QJsonDocument::fromJson(QByteArray(receivers_buffer));
+		QJsonDocument ristRDoc = QJsonDocument::fromJson(QByteArray(rist_receivers_buffer));
+		QJsonArray rArray;
+		
 		if (rDoc.isArray()) {
-			QJsonArray rArray = rDoc.array();
+			rArray = rDoc.array();
+		}
+		if (ristRDoc.isArray()) {
+			QJsonArray arr = ristRDoc.array();
+			for (int i = 0; i < arr.size(); ++i) {
+				rArray.append(arr[i]);
+			}
+		}
+
+		if (!rArray.isEmpty()) {
 			QSet<QString> currentReceiverNames;
 			for (int i = 0; i < rArray.size(); ++i) {
 				QJsonObject rObj = rArray[i].toObject();
@@ -265,13 +285,25 @@ void SrtlaStatusWidget::updateStatus()
 					fixBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
 
 					QObject::connect(startBtn, &QPushButton::clicked,
-							 [name]() { srtla_force_start_by_name(name.toUtf8().constData()); });
+							 [name, protocol]() {
+							 	if (protocol == "RIST") rist_force_start_by_name(name.toUtf8().constData());
+							 	else srtla_force_start_by_name(name.toUtf8().constData());
+							 });
 					QObject::connect(stopBtn, &QPushButton::clicked,
-							 [name]() { srtla_force_stop_by_name(name.toUtf8().constData()); });
+							 [name, protocol]() {
+							 	if (protocol == "RIST") rist_force_stop_by_name(name.toUtf8().constData());
+							 	else srtla_force_stop_by_name(name.toUtf8().constData());
+							 });
 					QObject::connect(restartBtn, &QPushButton::clicked,
-							 [name]() { srtla_force_restart_by_name(name.toUtf8().constData()); });
+							 [name, protocol]() {
+							 	if (protocol == "RIST") rist_force_restart_by_name(name.toUtf8().constData());
+							 	else srtla_force_restart_by_name(name.toUtf8().constData());
+							 });
 					QObject::connect(fixBtn, &QPushButton::clicked,
-							 [name]() { srtla_force_reload_by_name(name.toUtf8().constData()); });
+							 [name, protocol]() {
+							 	if (protocol == "RIST") rist_force_reload_by_name(name.toUtf8().constData());
+							 	else srtla_force_reload_by_name(name.toUtf8().constData());
+							 });
 
 					actionLayout->addWidget(startBtn);
 					actionLayout->addWidget(stopBtn);
@@ -670,6 +702,9 @@ extern "C" {
 void srtla_force_stop_all();
 void srtla_force_start_all();
 void srtla_force_restart_all();
+void rist_force_stop_all();
+void rist_force_start_all();
+void rist_force_restart_all();
 }
 
 #include <QProcess>
@@ -1700,14 +1735,14 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 	// Dynamically track primary source based on media playing state
 	bool currentPrimaryActive = false;
-	if (activePrimaryPort > 0 && srtla_is_media_playing(activePrimaryPort)) {
+	if (activePrimaryPort > 0 && (srtla_is_media_playing(activePrimaryPort) || rist_is_media_playing(activePrimaryPort))) {
 		currentPrimaryActive = true;
 	}
 
 	if (!currentPrimaryActive) {
 		int newPrimaryPort = 0;
 		for (auto it = portTotalKbps.begin(); it != portTotalKbps.end(); ++it) {
-			if (srtla_is_media_playing(it.key())) {
+			if (srtla_is_media_playing(it.key()) || rist_is_media_playing(it.key())) {
 				newPrimaryPort = it.key();
 				break;
 			}
@@ -1756,7 +1791,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 			matchDurationCounter = 0;
 			originalSceneName = "";
 		} else {
-			bool mediaIsPlaying = srtla_is_media_playing(activePrimaryPort);
+			bool mediaIsPlaying = srtla_is_media_playing(activePrimaryPort) || rist_is_media_playing(activePrimaryPort);
 
 			if (!mediaIsPlaying) {
 				// Media buffer is completely starved/empty
@@ -1870,13 +1905,22 @@ extern "C" void setup_srtla_menu()
 	srtlaMenu->addSeparator();
 
 	QAction *startAction = srtlaMenu->addAction("Start All Listeners");
-	QObject::connect(startAction, &QAction::triggered, []() { srtla_force_start_all(); });
+	QObject::connect(startAction, &QAction::triggered, []() { 
+		srtla_force_start_all(); 
+		rist_force_start_all();
+	});
 
 	QAction *restartAction = srtlaMenu->addAction("Restart All Listeners");
-	QObject::connect(restartAction, &QAction::triggered, []() { srtla_force_restart_all(); });
+	QObject::connect(restartAction, &QAction::triggered, []() { 
+		srtla_force_restart_all(); 
+		rist_force_restart_all();
+	});
 
 	QAction *stopAction = srtlaMenu->addAction("Stop All Listeners");
-	QObject::connect(stopAction, &QAction::triggered, []() { srtla_force_stop_all(); });
+	QObject::connect(stopAction, &QAction::triggered, []() { 
+		srtla_force_stop_all(); 
+		rist_force_stop_all();
+	});
 
 	srtlaMenu->addSeparator();
 

@@ -49,6 +49,7 @@ target_sources(
   PRIVATE
     src/plugin-main.c
     src/srtla-source.c
+    src/rist-source.c
     src/srtla-stats-filter.c
     src/srtla/srtla_rec.c
     src/srtla/common.c
