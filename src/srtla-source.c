@@ -411,7 +411,7 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		// We only need a small buffer in irl_source to absorb local decode/IPC jitter.
 		// Setting this to 15000 causes irl_source to dynamically slow down playback (micro-stutters)
 		// for minutes while it tries to build a second 15-second buffer on top of the SRT/RIST one!
-		obs_data_set_int(irl_settings, "buffer_target_ms", 800);
+		obs_data_set_int(irl_settings, "buffer_target_ms", 1000);
 		
 		obs_data_set_bool(irl_settings, "low_latency_audio", false); // Disable low_latency_audio to prevent micro-stutters
 		obs_data_set_bool(irl_settings, "adaptive_speed", false); // Disable adaptive speed to enforce a hard freeze instead of stuttering during starvation
