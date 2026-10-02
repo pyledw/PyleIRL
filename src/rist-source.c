@@ -258,6 +258,7 @@ static const char *rist_source_get_name(void *type_data)
 static void rist_audio_capture_cb(void *param, obs_source_t *source, const struct audio_data *audio_data, bool muted)
 {
 	UNUSED_PARAMETER(source);
+	UNUSED_PARAMETER(muted);
 	struct rist_source *context = param;
 	if (!context || !audio_data) return;
 

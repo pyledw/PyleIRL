@@ -304,7 +304,6 @@ int rist_rec_main(const struct rist_config *config) {
     struct rist_rec_context relay = {0};
     relay.udp_socket = -1;
     struct rist_logging_settings *logging_settings = NULL;
-    int ret = 0;
 
     blog(LOG_INFO, "[RIST] Starting RIST receiver on %s:%d, relaying to 127.0.0.1:%d", 
             config->listen_ip[0] ? config->listen_ip : "0.0.0.0", 
@@ -389,8 +388,8 @@ int rist_rec_main(const struct rist_config *config) {
 
     // Main read loop
     while (config->stop_flag && !*config->stop_flag) {
-        const struct rist_data_block *data_block = NULL;
-        int queue_size = rist_receiver_data_read(relay.ctx, &data_block, 50); // 50ms timeout
+        struct rist_data_block *data_block = NULL;
+        int queue_size = rist_receiver_data_read2(relay.ctx, &data_block, 50); // 50ms timeout
 
         if (queue_size > 0 && data_block && data_block->payload) {
             // Send payload to local UDP socket
