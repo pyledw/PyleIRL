@@ -216,7 +216,14 @@ static QString fetch_obs_websocket_screenshot(const QString &sourceName)
     
     // Try global_config (OBS 30 earlier)
     if (port <= 0) {
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
         config_t *global_config = obs_frontend_get_global_config();
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
         if (global_config) {
             port = config_get_int(global_config, "OBSWebSocket", "ServerPort");
             const char *pwd = config_get_string(global_config, "OBSWebSocket", "ServerPassword");
@@ -589,6 +596,7 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 
 static void handle_api_receivers(const httplib::Request &req, httplib::Response &res)
 {
+	(void)req;
 	char buf[4096] = {0};
 	srtla_get_all_receivers_json(buf, sizeof(buf));
 	
@@ -623,6 +631,7 @@ static void handle_api_receivers(const httplib::Request &req, httplib::Response 
 
 static void handle_api_stats(const httplib::Request &req, httplib::Response &res)
 {
+	(void)req;
 	int listen_port = 0, failed = 0;
 	char buf[16384] = {0};
 	srtla_get_connection_details(&listen_port, &failed, buf, sizeof(buf));
@@ -785,6 +794,7 @@ static void handle_api_multistream_manage(const httplib::Request &req, httplib::
 
 static void handle_api_obs_overview(const httplib::Request &req, httplib::Response &res)
 {
+	(void)req;
 	QJsonObject obj;
 	obj["status"] = "ok";
 	obj["connected"] = true;
