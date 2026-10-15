@@ -65,14 +65,14 @@ SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("Bonding Sta
 	// Compact summary bar
 	metricsLabel = new QLabel(this);
 	metricsLabel->setStyleSheet(
-		"QLabel { background-color: #1e1e1e; border: 1px solid #333333; border-radius: 4px; padding: 5px 8px; font-size: 11px; color: #d4d4d4; }");
+		"QLabel { background-color: #1a1a1a; border: 1px solid #2d2d2d; border-radius: 4px; padding: 4px 8px; font-size: 11px; color: #cccccc; }");
 	metricsLabel->setTextFormat(Qt::RichText);
-	metricsLabel->setText("<span style='color:#4CAF50; font-weight:bold;'>● Listening</span>  |  <b>Devices:</b> 0  |  <b>Connections:</b> 0  |  <b>Total:</b> 0 Kbps");
+	metricsLabel->setText("<span style='color:#4CAF50; font-weight:bold;'>● Listening</span> &nbsp;&bull;&nbsp; <b>Devices:</b> 0 &nbsp;&bull;&nbsp; <b>Links:</b> 0 &nbsp;&bull;&nbsp; <b>Total:</b> 0 Kbps");
 	mainLayout->addWidget(metricsLabel);
 
 	// Resizable vertical splitter between Receiver Controls and Connections
 	splitter = new QSplitter(Qt::Vertical, centralWidget);
-	splitter->setChildrenCollapsible(true);
+	splitter->setChildrenCollapsible(false);
 	splitter->setStyleSheet(
 		"QSplitter::handle:vertical { background-color: #333333; height: 5px; margin: 2px 0px; border-radius: 2px; } "
 		"QSplitter::handle:vertical:hover { background-color: #4CAF50; }");
@@ -80,54 +80,53 @@ SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("Bonding Sta
 	// Compact Receivers & Controls Table (primary section with priority)
 	receiversTable = new QTableWidget(splitter);
 	receiversTable->setColumnCount(3);
-	receiversTable->setHorizontalHeaderLabels(QStringList() << "Receiver" << "Status" << "Controls");
-	receiversTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+	receiversTable->setHorizontalHeaderLabels(QStringList() << "Receiver" << "Controls" << "Status & Health");
+	receiversTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+	receiversTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+	receiversTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
 	receiversTable->horizontalHeader()->setStretchLastSection(true);
-	receiversTable->setColumnWidth(0, 140);
-	receiversTable->setColumnWidth(1, 75);
-	receiversTable->setColumnWidth(2, 235);
+	receiversTable->horizontalHeader()->setMinimumSectionSize(60);
 	receiversTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	receiversTable->setSelectionMode(QAbstractItemView::NoSelection);
 	receiversTable->setAlternatingRowColors(true);
 	receiversTable->setStyleSheet(
-		"QTableWidget { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 3px; font-size: 12px; } "
-		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 4px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
+		"QTableWidget { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 3px; font-size: 11px; } "
+		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 3px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
 	receiversTable->verticalHeader()->setVisible(false);
-	receiversTable->verticalHeader()->setDefaultSectionSize(38);
-	receiversTable->setMinimumHeight(45);
-	receiversTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+	receiversTable->verticalHeader()->setDefaultSectionSize(34);
+	receiversTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
 	// Condensed Active Connections & KBPS Tree (minimized by default)
 	treeWidget = new QTreeWidget(splitter);
-	treeWidget->setHeaderLabels(QStringList() << "Active Connection / Link" << "Bitrate");
-	treeWidget->header()->setSectionResizeMode(QHeaderView::Interactive);
-	treeWidget->header()->setStretchLastSection(true);
-	treeWidget->setColumnWidth(0, 220);
-	treeWidget->setColumnWidth(1, 120);
+	treeWidget->setHeaderLabels(QStringList() << "Active Connection / Telemetry" << "Bitrate");
+	treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+	treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+	treeWidget->header()->setStretchLastSection(false);
 	treeWidget->setAlternatingRowColors(true);
 	treeWidget->setStyleSheet(
 		"QTreeWidget { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 3px; font-size: 11px; } "
-		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 4px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
+		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 3px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
 
 	splitter->addWidget(receiversTable);
 	splitter->addWidget(treeWidget);
-	splitter->setStretchFactor(0, 1); // Receivers table gets priority
-	splitter->setStretchFactor(1, 0); // Connections tree minimized by default
+	splitter->setCollapsible(0, false);
+	splitter->setStretchFactor(0, 0); // Table takes its content size
+	splitter->setStretchFactor(1, 1); // Tree expands to fill remaining space
 
 	QSettings settings("obs-studio", "PyleIRL");
-	QByteArray splitterState = settings.value("status_splitter_state").toByteArray();
+	QByteArray splitterState = settings.value("status_splitter_state_v2").toByteArray();
 	if (!splitterState.isEmpty()) {
 		splitter->restoreState(splitterState);
 	} else {
-		// By default, receiver controls take full size and connections tree is minimized
-		splitter->setSizes(QList<int>() << 500 << 0);
+		// Responsive initial split: receiver table compact on top, active connections tree below
+		splitter->setSizes(QList<int>() << 110 << 160);
 	}
 
-	QByteArray tableHeaderState = settings.value("status_table_header").toByteArray();
+	QByteArray tableHeaderState = settings.value("status_table_header_v2").toByteArray();
 	if (!tableHeaderState.isEmpty()) {
 		receiversTable->horizontalHeader()->restoreState(tableHeaderState);
 	}
-	QByteArray treeHeaderState = settings.value("status_tree_header").toByteArray();
+	QByteArray treeHeaderState = settings.value("status_tree_header_v2").toByteArray();
 	if (!treeHeaderState.isEmpty()) {
 		treeWidget->header()->restoreState(treeHeaderState);
 	}
@@ -152,13 +151,13 @@ SrtlaStatusWidget::~SrtlaStatusWidget()
 {
 	QSettings settings("obs-studio", "PyleIRL");
 	if (splitter) {
-		settings.setValue("status_splitter_state", splitter->saveState());
+		settings.setValue("status_splitter_state_v2", splitter->saveState());
 	}
 	if (receiversTable && receiversTable->horizontalHeader()) {
-		settings.setValue("status_table_header", receiversTable->horizontalHeader()->saveState());
+		settings.setValue("status_table_header_v2", receiversTable->horizontalHeader()->saveState());
 	}
 	if (treeWidget && treeWidget->header()) {
-		settings.setValue("status_tree_header", treeWidget->header()->saveState());
+		settings.setValue("status_tree_header_v2", treeWidget->header()->saveState());
 	}
 }
 
@@ -168,7 +167,7 @@ void SrtlaStatusWidget::onSplitterMoved(int pos, int index)
 	Q_UNUSED(index);
 	QSettings settings("obs-studio", "PyleIRL");
 	if (splitter) {
-		settings.setValue("status_splitter_state", splitter->saveState());
+		settings.setValue("status_splitter_state_v2", splitter->saveState());
 	}
 }
 
@@ -251,38 +250,51 @@ void SrtlaStatusWidget::updateStatus()
 				if (foundRow == -1) {
 					foundRow = receiversTable->rowCount();
 					receiversTable->insertRow(foundRow);
-					receiversTable->setRowHeight(foundRow, 40);
+					receiversTable->setRowHeight(foundRow, 34);
 
 					QTableWidgetItem *nameItem = new QTableWidgetItem(QString("[%1] %2 (%3)").arg(protocol, name, port));
 					nameItem->setData(Qt::UserRole, name);
 					nameItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
 					QTableWidgetItem *statusItem = new QTableWidgetItem();
-					statusItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignCenter);
+					statusItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 					
 					receiversTable->setItem(foundRow, 0, nameItem);
-					receiversTable->setItem(foundRow, 1, statusItem);
+					receiversTable->setItem(foundRow, 2, statusItem); // Status & Health in Column 2
 
 					QWidget *actionWidget = new QWidget();
 					QHBoxLayout *actionLayout = new QHBoxLayout(actionWidget);
-					actionLayout->setContentsMargins(2, 2, 2, 2);
-					actionLayout->setSpacing(4);
+					actionLayout->setContentsMargins(4, 2, 4, 2);
+					actionLayout->setSpacing(5);
 
-					QPushButton *startBtn = new QPushButton("Start");
-					QPushButton *stopBtn = new QPushButton("Stop");
-					QPushButton *restartBtn = new QPushButton("Restart");
-					QPushButton *fixBtn = new QPushButton("Fix Audio");
+					QPushButton *startBtn = new QPushButton("▶ Start");
+					QPushButton *stopBtn = new QPushButton("⏹ Stop");
+					QPushButton *restartBtn = new QPushButton("⟳ Restart");
+					QPushButton *fixBtn = new QPushButton("⚡ Fix A/V");
 
 					startBtn->setObjectName("startBtn");
 					stopBtn->setObjectName("stopBtn");
 					restartBtn->setObjectName("restartBtn");
 					fixBtn->setObjectName("fixBtn");
 					fixBtn->setToolTip("Rapidly reload the internal player to clear audio lag / desync without dropping the SRTLA connection");
+					restartBtn->setToolTip("Full restart of the receiver thread and connection");
 
-					startBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
-					stopBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
-					restartBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
-					fixBtn->setStyleSheet("QPushButton { padding: 4px 8px; font-size: 11px; }");
+					startBtn->setStyleSheet(
+						"QPushButton { background-color: #2e7d32; color: white; font-weight: bold; border: 1px solid #388e3c; border-radius: 3px; padding: 3px 9px; font-size: 11px; } "
+						"QPushButton:hover { background-color: #388e3c; } "
+						"QPushButton:disabled { background-color: #252525; color: #555555; border: 1px solid #303030; }");
+					stopBtn->setStyleSheet(
+						"QPushButton { background-color: #c62828; color: white; font-weight: bold; border: 1px solid #d32f2f; border-radius: 3px; padding: 3px 9px; font-size: 11px; } "
+						"QPushButton:hover { background-color: #d32f2f; } "
+						"QPushButton:disabled { background-color: #252525; color: #555555; border: 1px solid #303030; }");
+					restartBtn->setStyleSheet(
+						"QPushButton { background-color: #333333; color: #d4d4d4; border: 1px solid #444444; border-radius: 3px; padding: 3px 7px; font-size: 11px; } "
+						"QPushButton:hover { background-color: #444444; color: white; } "
+						"QPushButton:disabled { background-color: #222222; color: #555555; border: 1px solid #2a2a2a; }");
+					fixBtn->setStyleSheet(
+						"QPushButton { background-color: #333333; color: #d4d4d4; border: 1px solid #444444; border-radius: 3px; padding: 3px 7px; font-size: 11px; } "
+						"QPushButton:hover { background-color: #444444; color: white; } "
+						"QPushButton:disabled { background-color: #222222; color: #555555; border: 1px solid #2a2a2a; }");
 
 					QObject::connect(startBtn, &QPushButton::clicked,
 							 [name, protocol]() {
@@ -307,39 +319,45 @@ void SrtlaStatusWidget::updateStatus()
 
 					actionLayout->addWidget(startBtn);
 					actionLayout->addWidget(stopBtn);
+					actionLayout->addSpacing(3);
 					actionLayout->addWidget(restartBtn);
 					actionLayout->addWidget(fixBtn);
-					receiversTable->setCellWidget(foundRow, 2, actionWidget);
+					receiversTable->setCellWidget(foundRow, 1, actionWidget); // Controls in Column 1 (Front & Center!)
 				}
 
 				QTableWidgetItem *nameItem = receiversTable->item(foundRow, 0);
-				if (nameItem) nameItem->setText(QString("[%1] %2 (%3)").arg(protocol, name, port));
+				if (nameItem) {
+					nameItem->setText(QString("[%1] %2 (%3)").arg(protocol, name, port));
+					nameItem->setToolTip(QString("Protocol: %1\nReceiver: %2\nPort: %3").arg(protocol, name, port));
+				}
 
-				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 1);
+				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 2);
 				if (statusItem) {
-					QString statusText = running ? "Running" : "Stopped";
-					if (running) {
-						statusText += QString(" (Drift: %1ms, Resets: %2)").arg(drift_ms).arg(resets);
-						if (audio_starved || std::abs(drift_ms) > 500) {
-							statusText += " [⚠️ BAD AUDIO]";
-						}
-					}
-					statusItem->setText(statusText);
-					
+					QString statusText;
 					if (running) {
 						if (audio_starved || std::abs(drift_ms) > 500) {
+							statusText = QString("⚠️ Desync (%1ms) • Resets: %2").arg(drift_ms).arg(resets);
 							statusItem->setForeground(QBrush(QColor("#F44336"))); // Red
 						} else if (std::abs(drift_ms) > 100) {
-							statusItem->setForeground(QBrush(QColor("#FFC107"))); // Yellow
+							statusText = QString("● Running • %1ms drift • Resets: %2").arg(drift_ms).arg(resets);
+							statusItem->setForeground(QBrush(QColor("#FFB300"))); // Amber
 						} else {
+							statusText = QString("● Running • %1ms drift • Resets: %2").arg(drift_ms).arg(resets);
 							statusItem->setForeground(QBrush(QColor("#4CAF50"))); // Green
 						}
 					} else {
-						statusItem->setForeground(QBrush(QColor("gray")));
+						statusText = "○ Stopped";
+						statusItem->setForeground(QBrush(QColor("#888888")));
 					}
+					statusItem->setText(statusText);
+					statusItem->setToolTip(QString("Status: %1\nAudio Drift: %2 ms\nAuto-Resets: %3\nAudio Starved: %4")
+						.arg(running ? "Running" : "Stopped")
+						.arg(drift_ms)
+						.arg(resets)
+						.arg(audio_starved ? "Yes" : "No"));
 				}
 
-				QWidget *actionWidget = receiversTable->cellWidget(foundRow, 2);
+				QWidget *actionWidget = receiversTable->cellWidget(foundRow, 1);
 				if (actionWidget) {
 					QPushButton *startBtn = actionWidget->findChild<QPushButton*>("startBtn");
 					QPushButton *stopBtn = actionWidget->findChild<QPushButton*>("stopBtn");
@@ -363,7 +381,7 @@ void SrtlaStatusWidget::updateStatus()
 			}
 
 			int totalRows = receiversTable->rowCount();
-			int calculatedMinHeight = qMax(45, totalRows * 38 + 26);
+			int calculatedMinHeight = qMax(38, totalRows * 34 + 26);
 			receiversTable->setMinimumHeight(calculatedMinHeight);
 		}
 
@@ -413,11 +431,28 @@ void SrtlaStatusWidget::updateStatus()
 					int retries = gObj["retries"].toInt();
 					int missing_q = gObj["missing_queue"].toInt();
 					int rtt = gObj["rtt"].toInt();
-					nodeName += QString("  [Quality: %1% | Lost: %2 | Retries: %3 | Queue: %4 | RTT: %5ms]").arg(quality, 0, 'f', 1).arg(lost).arg(retries).arg(missing_q).arg(rtt);
+					nodeName += QString("  •  Q: %1%  •  L: %2  •  Buf: %3ms")
+						.arg(quality, 0, 'f', 0)
+						.arg(lost)
+						.arg(missing_q);
+					if (retries > 0) {
+						nodeName += QString("  •  R: %1").arg(retries);
+					}
+					if (rtt > 0) {
+						nodeName += QString("  •  %1ms").arg(rtt);
+					}
+					groupItem->setToolTip(0, QString("Device #%1 (Port %2)\nLink Quality: %3%\nLost Packets: %4\nRetries: %5\nQueue Buffer: %6 ms\nRTT: %7 ms")
+						.arg(groupIdStr)
+						.arg(listenPortStr)
+						.arg(quality, 0, 'f', 1)
+						.arg(lost)
+						.arg(retries)
+						.arg(missing_q)
+						.arg(rtt));
 				}
 
 				if (srtla_is_audio_starved(listenPortStr.toInt())) {
-					groupItem->setText(0, nodeName + "  [⚠️ BAD AUDIO / OUT OF SYNC]");
+					groupItem->setText(0, nodeName + "  [⚠️ DESYNC]");
 					groupItem->setForeground(0, QBrush(QColor("#F44336"))); // Red
 				} else {
 					groupItem->setText(0, nodeName);
@@ -480,7 +515,7 @@ void SrtlaStatusWidget::updateStatus()
 			}
 		}
 
-		QString summaryText = QString("<span style='color:%1; font-weight:bold;'>● %2</span>  |  <b>Devices:</b> %3  |  <b>Connections:</b> %4  |  <b>Total:</b> %5 Kbps")
+		QString summaryText = QString("<span style='color:%1; font-weight:bold;'>● %2</span> &nbsp;&bull;&nbsp; <b>Devices:</b> %3 &nbsp;&bull;&nbsp; <b>Links:</b> %4 &nbsp;&bull;&nbsp; <b>Total:</b> <span style='color:#4CAF50; font-weight:bold;'>%5 Kbps</span>")
 			.arg(is_listening ? "#4CAF50" : "#888888")
 			.arg(is_listening ? "Listening" : "Idle")
 			.arg(groups)
