@@ -332,8 +332,25 @@
                         const mbps = totalKbps / 1000.0;
                         document.getElementById('val-kbps').textContent = `${mbps.toFixed(1)} Mbps`;
                     }
-                    document.getElementById('val-quality').textContent = `${displayQuality.toFixed(1)}%`;
-                    document.getElementById('val-lost').textContent = displayLost;
+
+                    const qElem = document.getElementById('val-quality');
+                    if (qElem) {
+                        qElem.textContent = `${displayQuality.toFixed(1)}%`;
+                        if (displayQuality >= 85) {
+                            qElem.style.color = '#10b981'; // Healthy green
+                        } else if (displayQuality >= 60) {
+                            qElem.style.color = '#f59e0b'; // Degraded amber
+                        } else {
+                            qElem.style.color = '#ef4444'; // Unhealthy red
+                        }
+                    }
+
+                    const lostElem = document.getElementById('val-lost');
+                    if (lostElem) {
+                        lostElem.textContent = displayLost;
+                        lostElem.style.color = displayLost > 0 ? '#ef4444' : '';
+                    }
+
                     document.getElementById('val-retries').textContent = displayRetries;
                     document.getElementById('val-queue').textContent = displayQueue;
                     document.getElementById('val-rtt').textContent = displayRtt + ' ms';

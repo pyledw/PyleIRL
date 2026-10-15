@@ -225,6 +225,10 @@ bool rist_is_media_playing(int listen_port) {
 		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 500000000ULL));
 		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 500000000ULL));
 
+		if (curr->media_source && obs_source_get_base_width(curr->media_source) == 0) {
+			video_playing = false;
+		}
+
 		if (curr->last_audio_time > 0 && curr->last_video_time > 0) {
 			// If stream has both audio and video, require video to be playing
 			// This fixes the issue where a frozen video frame wouldn't trigger failover if audio kept going
@@ -233,7 +237,10 @@ bool rist_is_media_playing(int listen_port) {
 				break;
 			}
 		} else if (curr->last_audio_time > 0) {
-			if (audio_playing) {
+			if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 2000000000ULL)) {
+				// Connected for >2s but still no video frames locked -> not playing
+				playing = false;
+			} else if (audio_playing) {
 				playing = true;
 				break;
 			}
@@ -444,7 +451,7 @@ static obs_source_t* rist_create_media_source_internal(struct rist_source *conte
 		obs_data_set_bool(irl_settings, "close_when_inactive", false);
 		char ffmpeg_opts[256];
 		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
-			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=%d", 
+			"fflags=nobuffer+discardcorrupt+genpts probesize=1048576 analyzeduration=2000000 rw_timeout=%d", 
 			(context->latency + 5000) * 1000);
 		obs_data_set_string(irl_settings, "ffmpeg_options", ffmpeg_opts);
 
@@ -503,7 +510,7 @@ static obs_source_t* rist_create_media_source_internal(struct rist_source *conte
 		obs_data_set_int(media_settings, "buffering_mb", 0);
 		char ffmpeg_opts[256];
 		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
-			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=%d", 
+			"fflags=nobuffer+discardcorrupt+genpts probesize=1048576 analyzeduration=2000000 rw_timeout=%d", 
 			(context->latency + 5000) * 1000);
 		obs_data_set_string(media_settings, "ffmpeg_options", ffmpeg_opts);
 
@@ -871,6 +878,14 @@ static void rist_source_video_tick(void *data, float seconds)
 		if (context->needs_reload) {
 			context->needs_reload = false;
 			rist_reload_media_source(context);
+		}
+
+		if (context->media_source && obs_source_get_base_width(context->media_source) > 0) {
+			uint64_t current_media_time = obs_source_media_get_time(context->media_source);
+			if (current_media_time != context->last_media_time) {
+				context->last_video_time = now;
+				context->last_media_time = current_media_time;
+			}
 		}
 
 		if (now - context->last_audio_time > 100000000ULL) {

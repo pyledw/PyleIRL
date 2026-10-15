@@ -99,6 +99,7 @@ private slots:
 private:
 	QComboBox *enableAutoSwitch;
 	QSpinBox *switchDelay;
+	QSpinBox *returnDelay;
 	QComboBox *failoverSceneBox;
 	QListWidget *noFailoverList;
 
@@ -158,6 +159,8 @@ private:
 	QSet<QString> noFailoverScenes;
 	bool isCurrentlyFailover;
 	int matchDurationCounter;
+	int recoveryDurationCounter;
+	int returnDelay;
 
 	QSet<int> currentMatchedVisRules;
 	QSet<int> currentlyAppliedVisRules;

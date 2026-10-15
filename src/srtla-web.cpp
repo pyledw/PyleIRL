@@ -194,11 +194,9 @@ static QString fetch_obs_websocket_screenshot(const QString &sourceName)
     
     // Try obs-websocket config.json directly (OBS 30+)
     QString configPath = qEnvironmentVariable("APPDATA") + "/obs-studio/plugin_config/obs-websocket/config.json";
-    blog(LOG_INFO, "[PyleIRL Web] Checking OBS WebSocket config at: %s", configPath.toUtf8().constData());
     QFile file(configPath);
     if (file.open(QIODevice::ReadOnly)) {
         QByteArray raw = file.readAll();
-        blog(LOG_INFO, "[PyleIRL Web] Raw WebSocket config JSON: %s", raw.constData());
         QJsonObject obj = QJsonDocument::fromJson(raw).object();
         
         if (obj.contains("ServerPort")) port = obj["ServerPort"].toInt();
@@ -208,10 +206,6 @@ static QString fetch_obs_websocket_screenshot(const QString &sourceName)
         if (obj.contains("ServerPassword")) password = obj["ServerPassword"].toString();
         else if (obj.contains("server_password")) password = obj["server_password"].toString();
         else if (obj.contains("serverPassword")) password = obj["serverPassword"].toString();
-
-        blog(LOG_INFO, "[PyleIRL Web] Parsed WebSocket config: Port=%d", port);
-    } else {
-        blog(LOG_WARNING, "[PyleIRL Web] Could not open WebSocket config file");
     }
     
     // Try global_config (OBS 30 earlier)
@@ -532,11 +526,10 @@ static void handle_api_autoswitch_get(const httplib::Request &req, httplib::Resp
 		obj["visibility_rules"] = visRules ? QString(visRules) : "[]";
 		obj["volume_rules"] = volRules ? QString(volRules) : "[]";
 		obj["delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "Delay"));
+		obj["return_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "ReturnDelay"));
 		obj["vis_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay"));
 		obj["vol_enabled"] = config_get_bool(global_config, "SRTLA_AutoSwitch", "VolEnabled");
 		obj["vol_delay"] = static_cast<int>(config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay"));
-		
-
 	}
 	QJsonDocument doc(obj);
 	res.set_content(doc.toJson(QJsonDocument::Compact).toStdString(), "application/json");
@@ -577,6 +570,8 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 					  obj["volume_rules"].toString().toUtf8().constData());
 		if (obj.contains("delay"))
 			config_set_int(global_config, "SRTLA_AutoSwitch", "Delay", obj["delay"].toInt());
+		if (obj.contains("return_delay"))
+			config_set_int(global_config, "SRTLA_AutoSwitch", "ReturnDelay", obj["return_delay"].toInt());
 		if (obj.contains("vis_delay"))
 			config_set_int(global_config, "SRTLA_AutoSwitch", "VisDelay", obj["vis_delay"].toInt());
 		if (obj.contains("vol_enabled"))

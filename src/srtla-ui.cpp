@@ -825,7 +825,12 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	switchDelay = new QSpinBox();
 	switchDelay->setRange(0, 60);
 	switchDelay->setSuffix(" seconds");
-	switchDelay->setValue(2); // Default 2 seconds
+	switchDelay->setValue(4); // Default 4 seconds
+
+	returnDelay = new QSpinBox();
+	returnDelay->setRange(1, 60);
+	returnDelay->setSuffix(" seconds");
+	returnDelay->setValue(5); // Default 5 seconds
 
 	failoverSceneBox = new QComboBox();
 
@@ -882,6 +887,7 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 	sceneLayout->addRow("Enable Media Auto-Switch:", enableAutoSwitch);
 	sceneLayout->addRow("Failover (Disconnected) Scene:", failoverSceneBox);
 	sceneLayout->addRow("Switch Delay (Failover only):", switchDelay);
+	sceneLayout->addRow("Return Delay (Restore Live):", returnDelay);
 
 	noFailoverList = new QListWidget();
 	noFailoverList->setMaximumHeight(120);
@@ -975,6 +981,15 @@ SrtlaAutoSwitchDialog::SrtlaAutoSwitchDialog(QWidget *parent) : QDialog(parent)
 		int delay = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
 		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "Delay")) {
 			switchDelay->setValue(delay);
+		} else {
+			switchDelay->setValue(4);
+		}
+
+		int rDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "ReturnDelay");
+		if (config_has_user_value(global_config, "SRTLA_AutoSwitch", "ReturnDelay")) {
+			returnDelay->setValue(rDelay);
+		} else {
+			returnDelay->setValue(5);
 		}
 
 		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
@@ -1144,6 +1159,7 @@ void SrtlaAutoSwitchDialog::saveSettings()
 	if (global_config) {
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "Enabled", enableAutoSwitch->currentIndex() == 1);
 		config_set_int(global_config, "SRTLA_AutoSwitch", "Delay", switchDelay->value());
+		config_set_int(global_config, "SRTLA_AutoSwitch", "ReturnDelay", returnDelay->value());
 		config_set_string(global_config, "SRTLA_AutoSwitch", "FailoverScene", failoverSceneBox->currentText().toUtf8().constData());
 
 		config_set_bool(global_config, "SRTLA_AutoSwitch", "VisEnabled", enableVisSwitch->currentIndex() == 1);
@@ -1461,6 +1477,7 @@ void SrtlaAutoSwitcher::start()
 	loadRules();
 	isCurrentlyFailover = false;
 	matchDurationCounter = 0;
+	recoveryDurationCounter = 0;
 
 	currentMatchedVisRules.clear();
 	currentlyAppliedVisRules.clear();
@@ -1583,6 +1600,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	    (!volEnabled || volumeRules.isEmpty())) {
 		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
+		recoveryDurationCounter = 0;
 		currentMatchedVisRules.clear();
 		visMatchDurationCounter = 0;
 		currentMatchedVolRules.clear();
@@ -1591,6 +1609,13 @@ void SrtlaAutoSwitcher::checkBitrate()
 	}
 
 	int delay = config_get_int(global_config, "SRTLA_AutoSwitch", "Delay");
+	int returnDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "ReturnDelay");
+	if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "ReturnDelay") || returnDelay <= 0) {
+		returnDelay = 5;
+	}
+	if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "Delay") || delay <= 0) {
+		delay = 4;
+	}
 	int visDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
 	int volDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VolDelay");
 	if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "VolDelay")) {
@@ -1789,16 +1814,18 @@ void SrtlaAutoSwitcher::checkBitrate()
 			// Current scene is marked as No Failover: auto scene switching is disabled
 			isCurrentlyFailover = false;
 			matchDurationCounter = 0;
+			recoveryDurationCounter = 0;
 			originalSceneName = "";
 		} else {
 			bool mediaIsPlaying = srtla_is_media_playing(activePrimaryPort) || rist_is_media_playing(activePrimaryPort);
 
 			if (!mediaIsPlaying) {
-				// Media buffer is completely starved/empty
+				// Media buffer is starved, frozen, or heavily corrupt
+				recoveryDurationCounter = 0; // Reset recovery timer immediately!
 				if (!isCurrentlyFailover) {
 					matchDurationCounter++;
 					if (matchDurationCounter >= delay) {
-						// Delay met, switch to failover
+						// Delay met (e.g. 4 seconds), switch to failover
 						if (currentSceneName != failoverScene) {
 							// Save this scene so we can restore it later
 							if (originalSceneName.isEmpty()) {
@@ -1814,20 +1841,26 @@ void SrtlaAutoSwitcher::checkBitrate()
 					}
 				}
 			} else {
-				// Media buffer is successfully delivering frames
-				matchDurationCounter = 0;
+				// Media buffer is delivering healthy frames
+				matchDurationCounter = 0; // Reset failover counter
 				if (isCurrentlyFailover) {
-					// Immediately switch back to original scene with NO delay
-					if (!originalSceneName.isEmpty()) {
-						QString targetToRestore = originalSceneName;
-						originalSceneName = "";
-						obs_source_t *targetSceneSrc = obs_get_source_by_name(targetToRestore.toUtf8().constData());
-						if (targetSceneSrc) {
-							obs_frontend_set_current_scene(targetSceneSrc);
-							obs_source_release(targetSceneSrc);
+					// Require continuous good stream for returnDelay (default 5s) before returning to Live!
+					recoveryDurationCounter++;
+					if (recoveryDurationCounter >= returnDelay) {
+						if (!originalSceneName.isEmpty()) {
+							QString targetToRestore = originalSceneName;
+							originalSceneName = "";
+							obs_source_t *targetSceneSrc = obs_get_source_by_name(targetToRestore.toUtf8().constData());
+							if (targetSceneSrc) {
+								obs_frontend_set_current_scene(targetSceneSrc);
+								obs_source_release(targetSceneSrc);
+							}
 						}
+						isCurrentlyFailover = false;
+						recoveryDurationCounter = 0;
 					}
-					isCurrentlyFailover = false;
+				} else {
+					recoveryDurationCounter = 0;
 				}
 			}
 		}

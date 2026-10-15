@@ -1337,7 +1337,7 @@ void srtla_get_connection_stats(bool *is_listening, int *active_groups, int *act
     pthread_mutex_unlock(&global_ctx_mutex);
 }
 
-extern void srtla_get_external_stats(uint32_t *lost, uint32_t *retries, uint32_t *queue, uint32_t *rtt);
+extern void srtla_get_external_stats(double *quality, uint32_t *lost, uint32_t *retries, uint32_t *queue, uint32_t *rtt);
 
 void srtla_get_connection_details(int *listen_port, int *failed_conns, char* out_buffer, int max_len) {
     *listen_port = 0; // Deprecated single port
@@ -1377,10 +1377,11 @@ void srtla_get_connection_details(int *listen_port, int *failed_conns, char* out
                 while (g && offset < max_len - 1) {
                     if (!first_group) offset += snprintf(out_buffer + offset, max_len - offset, ",");
                     first_group = false;
+                    double ext_quality = 100.0;
                     uint32_t ext_lost = 0, ext_retries = 0, ext_queue = 0, ext_rtt = 0;
-                    srtla_get_external_stats(&ext_lost, &ext_retries, &ext_queue, &ext_rtt);
-                    offset += snprintf(out_buffer + offset, max_len - offset, "{\"id\":%llu,\"bytes\":%llu,\"listen_port\":%d,\"lost\":%u,\"retries\":%u,\"missing_queue\":%u,\"rtt\":%u,\"conns\":[", 
-                        (unsigned long long)g->logical_group_id, (unsigned long long)g->bytes_received, ctx->_listen_port, ext_lost, ext_retries, ext_queue, ext_rtt);
+                    srtla_get_external_stats(&ext_quality, &ext_lost, &ext_retries, &ext_queue, &ext_rtt);
+                    offset += snprintf(out_buffer + offset, max_len - offset, "{\"id\":%llu,\"bytes\":%llu,\"listen_port\":%d,\"quality\":%.1f,\"lost\":%u,\"retries\":%u,\"missing_queue\":%u,\"rtt\":%u,\"conns\":[", 
+                        (unsigned long long)g->logical_group_id, (unsigned long long)g->bytes_received, ctx->_listen_port, ext_quality, ext_lost, ext_retries, ext_queue, ext_rtt);
                     
                     conn_t *c = g->conns;
                     while (c && offset < max_len - 1) {

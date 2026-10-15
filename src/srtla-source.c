@@ -29,12 +29,66 @@ static uint32_t srtla_global_retries = 0;
 static uint32_t srtla_global_queue = 0;
 static uint32_t srtla_last_pktdrop = 0;
 static uint32_t srtla_last_quality_events = 0;
+static uint32_t srtla_last_underruns = 0;
 
-void srtla_get_external_stats(uint32_t *lost, uint32_t *retries, uint32_t *queue, uint32_t *rtt) {
-    *lost = srtla_global_lost;
-    *retries = srtla_global_retries;
-    *queue = srtla_global_queue;
-    *rtt = 0; // Not available
+static double srtla_global_quality = 100.0;
+static uint32_t srtla_recent_corrupt_drops = 0;
+static uint32_t srtla_recent_pes_mismatches = 0;
+static uint32_t srtla_recent_decoder_errors = 0;
+static uint32_t srtla_recent_underruns = 0;
+static uint64_t srtla_last_quality_eval_ns = 0;
+
+static void srtla_update_quality_metrics(void) {
+    uint64_t now_ns = os_gettime_ns();
+    if (srtla_last_quality_eval_ns == 0) {
+        srtla_last_quality_eval_ns = now_ns;
+        return;
+    }
+
+    double target_q = 100.0;
+
+    // Penalize corrupt packet drops (MPEG-TS demuxer dropped corrupted packets)
+    target_q -= (double)(srtla_recent_corrupt_drops * 5.0);
+
+    // Penalize PES packet mismatches and decoder errors
+    target_q -= (double)(srtla_recent_pes_mismatches * 2.5);
+    target_q -= (double)(srtla_recent_decoder_errors * 3.0);
+
+    // Penalize audio underruns
+    target_q -= (double)(srtla_recent_underruns * 10.0);
+
+    // Penalize queue/buffer starvation (target is 1000ms)
+    if (srtla_global_queue > 0 && srtla_global_queue < 500) {
+        target_q -= (double)(500 - srtla_global_queue) * 0.1;
+    }
+
+    if (target_q < 0.0) target_q = 0.0;
+    if (target_q > 100.0) target_q = 100.0;
+
+    if (target_q < srtla_global_quality) {
+        // Instant drop so degradation is immediately apparent
+        srtla_global_quality = target_q;
+    } else {
+        // Smooth 15% recovery per second
+        srtla_global_quality = (srtla_global_quality * 0.85) + (target_q * 0.15);
+    }
+
+    if (now_ns - srtla_last_quality_eval_ns >= 1000000000ULL) {
+        srtla_last_quality_eval_ns = now_ns;
+        srtla_recent_corrupt_drops = 0;
+        srtla_recent_pes_mismatches = 0;
+        srtla_recent_decoder_errors = 0;
+        srtla_recent_underruns = 0;
+    }
+}
+
+void srtla_get_external_stats(double *quality, uint32_t *lost, uint32_t *retries, uint32_t *queue, uint32_t *rtt) {
+    srtla_update_quality_metrics();
+    if (quality) *quality = srtla_global_quality;
+    if (lost) *lost = srtla_global_lost;
+    if (retries) *retries = srtla_global_retries;
+    if (queue) *queue = srtla_global_queue;
+    if (rtt) *rtt = 0; // Not available
 }
 
 static log_handler_t original_log_handler = NULL;
@@ -54,10 +108,23 @@ static void irl_log_handler(int log_level, const char *msg, va_list args, void *
     char buffer[2048];
     vsnprintf(buffer, sizeof(buffer), msg, args);
 
+    if (strstr(buffer, "Packet corrupt") != NULL) {
+        srtla_recent_corrupt_drops++;
+        srtla_global_lost_history[srtla_global_history_index]++;
+        srtla_global_lost++;
+    } else if (strstr(buffer, "PES packet size mismatch") != NULL) {
+        srtla_recent_pes_mismatches++;
+    } else if (strstr(buffer, "non-existing PPS") != NULL || strstr(buffer, "no frame!") != NULL) {
+        srtla_recent_decoder_errors++;
+    } else if (strstr(buffer, "Audio underrun") != NULL) {
+        srtla_recent_underruns++;
+    }
+
     if (strstr(buffer, "[irl-source] Stats:") != NULL) {
         uint32_t buf = 0;
         uint32_t pktdrop = 0;
         uint32_t quality_events = 0;
+        uint32_t underruns = 0;
 
         const char *buf_ptr = strstr(buffer, "buf=");
         if (buf_ptr) sscanf(buf_ptr, "buf=%ums", &buf);
@@ -68,14 +135,20 @@ static void irl_log_handler(int log_level, const char *msg, va_list args, void *
         const char *quality_events_ptr = strstr(buffer, "quality_events=");
         if (quality_events_ptr) sscanf(quality_events_ptr, "quality_events=%u", &quality_events);
 
+        const char *underruns_ptr = strstr(buffer, "underruns=");
+        if (underruns_ptr) sscanf(underruns_ptr, "underruns=%u", &underruns);
+
         uint32_t delta_lost = (pktdrop >= srtla_last_pktdrop) ? (pktdrop - srtla_last_pktdrop) : 0;
         uint32_t delta_retries = (quality_events >= srtla_last_quality_events) ? (quality_events - srtla_last_quality_events) : 0;
-        
+        uint32_t delta_underruns = (underruns >= srtla_last_underruns) ? (underruns - srtla_last_underruns) : 0;
+
+        srtla_recent_underruns += delta_underruns;
         srtla_last_pktdrop = pktdrop;
         srtla_last_quality_events = quality_events;
+        srtla_last_underruns = underruns;
         srtla_global_queue = buf;
 
-        srtla_global_lost_history[srtla_global_history_index] = delta_lost;
+        srtla_global_lost_history[srtla_global_history_index] += delta_lost;
         srtla_global_retries_history[srtla_global_history_index] = delta_retries;
         srtla_global_history_index = (srtla_global_history_index + 1) % 30;
 
@@ -203,6 +276,14 @@ bool srtla_is_media_playing(int listen_port) {
 		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 500000000ULL));
 		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 500000000ULL));
 
+		if (curr->media_source && obs_source_get_base_width(curr->media_source) == 0) {
+			video_playing = false;
+		}
+
+		if (srtla_global_quality < 15.0) {
+			video_playing = false;
+		}
+
 		if (curr->last_audio_time > 0 && curr->last_video_time > 0) {
 			// If stream has both audio and video, require video to be playing
 			// This fixes the issue where a frozen video frame wouldn't trigger failover if audio kept going
@@ -211,7 +292,10 @@ bool srtla_is_media_playing(int listen_port) {
 				break;
 			}
 		} else if (curr->last_audio_time > 0) {
-			if (audio_playing) {
+			if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 2000000000ULL)) {
+				// Connected for >2s but still no video frames locked -> not playing
+				playing = false;
+			} else if (audio_playing) {
 				playing = true;
 				break;
 			}
@@ -422,7 +506,7 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		obs_data_set_bool(irl_settings, "close_when_inactive", false);
 		char ffmpeg_opts[256];
 		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
-			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=90000000");
+			"fflags=nobuffer+discardcorrupt+genpts probesize=1048576 analyzeduration=2000000 rw_timeout=90000000");
 		obs_data_set_string(irl_settings, "ffmpeg_options", ffmpeg_opts);
 
 		new_media = obs_source_create_private("irl_source", source_name, irl_settings);
@@ -480,7 +564,7 @@ static obs_source_t* srtla_create_media_source_internal(struct srtla_source *con
 		obs_data_set_int(media_settings, "buffering_mb", 0);
 		char ffmpeg_opts[256];
 		snprintf(ffmpeg_opts, sizeof(ffmpeg_opts), 
-			"fflags=nobuffer+discardcorrupt+genpts probesize=131072 analyzeduration=1000000 rw_timeout=%d", 
+			"fflags=nobuffer+discardcorrupt+genpts probesize=1048576 analyzeduration=2000000 rw_timeout=%d", 
 			(context->latency + 5000) * 1000);
 		obs_data_set_string(media_settings, "ffmpeg_options", ffmpeg_opts);
 
@@ -804,6 +888,14 @@ static void srtla_source_video_tick(void *data, float seconds)
 		if (context->needs_reload) {
 			context->needs_reload = false;
 			srtla_reload_media_source(context);
+		}
+
+		if (context->media_source && obs_source_get_base_width(context->media_source) > 0) {
+			uint64_t current_media_time = obs_source_media_get_time(context->media_source);
+			if (current_media_time != context->last_media_time) {
+				context->last_video_time = now;
+				context->last_media_time = current_media_time;
+			}
 		}
 
 		if (now - context->last_audio_time > 100000000ULL) {
