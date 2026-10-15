@@ -1052,12 +1052,7 @@ static ULONG get_interface_index_for_ip(const char *ip_str) {
   struct in_addr dest_ip;
   if (inet_pton(AF_INET, ip_str, &dest_ip) <= 0) return 0;
 
-  // First try GetBestInterface
-  if (GetBestInterface(dest_ip.s_addr, &if_index) == NO_ERROR) {
-    return if_index;
-  }
-
-  // Fallback: GetAdaptersAddresses
+  // Search all local network adapters for the exact unicast IP match
   ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
   ULONG buf_size = 15000;
   PIP_ADAPTER_ADDRESSES addresses = (PIP_ADAPTER_ADDRESSES)malloc(buf_size);
