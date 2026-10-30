@@ -267,7 +267,7 @@ static void rist_audio_capture_cb(void *param, obs_source_t *source, const struc
 	UNUSED_PARAMETER(source);
 	UNUSED_PARAMETER(muted);
 	struct rist_source *context = param;
-	if (!context || !audio_data) return;
+	if (!context || !audio_data || !context->media_source || context->stop_flag) return;
 
 	uint64_t now = os_gettime_ns();
 	context->last_audio_time = now;
@@ -384,6 +384,7 @@ static void *rist_source_create(obs_data_t *settings, obs_source_t *source)
 
 static void rist_stop_thread(struct rist_source *context)
 {
+	context->stop_flag = 1;
 	if (context->thread_running) {
 		context->stop_flag = 1;
 		pthread_join(context->rist_thread, NULL);

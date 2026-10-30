@@ -84,6 +84,7 @@ public:
 
 	void startAll();
 	void stopAll();
+	void shutdown();
 
 signals:
 	void targetsChanged();

@@ -40,10 +40,18 @@ MODULE_EXPORT const char *obs_module_description(void)
 
 extern struct obs_source_info srtla_source_info;
 extern struct obs_source_info rist_source_info;
+extern struct obs_source_info srtla_stats_filter_info;
 
 extern void *create_srtla_dock();
 extern void *create_srtla_multistream_dock();
 extern void setup_srtla_menu();
+extern void srtla_force_stop_all(void);
+extern void rist_force_stop_all(void);
+extern void pyleirl_shutdown(void);
+extern void srtla_init_log_handler(void);
+extern void srtla_free_log_handler(void);
+extern void rist_init_log_handler(void);
+extern void rist_free_log_handler(void);
 
 char *srtla_get_frpc_path(void)
 {
@@ -61,10 +69,12 @@ static void frontend_event_cb(enum obs_frontend_event event, void *private_data)
 		setup_srtla_menu();
 		obs_frontend_add_dock_by_id("srtla_status_dock", "Bonding Status", create_srtla_dock());
 		obs_frontend_add_dock_by_id("srtla_multistream_dock", "Multistream Status", create_srtla_multistream_dock());
+	} else if (event == OBS_FRONTEND_EVENT_SCRIPTING_SHUTDOWN || event == OBS_FRONTEND_EVENT_EXIT) {
+		pyleirl_shutdown();
+		srtla_force_stop_all();
+		rist_force_stop_all();
 	}
 }
-
-extern struct obs_source_info srtla_stats_filter_info;
 
 static void register_source_compat(struct obs_source_info *info)
 {
@@ -79,12 +89,6 @@ static void register_source_compat(struct obs_source_info *info)
 
 	obs_register_source_s(info, info_size);
 }
-
-extern void srtla_init_log_handler(void);
-extern void srtla_free_log_handler(void);
-extern void rist_init_log_handler(void);
-extern void rist_free_log_handler(void);
-extern void pyleirl_shutdown(void);
 
 bool obs_module_load(void)
 {
@@ -101,9 +105,9 @@ bool obs_module_load(void)
 void obs_module_unload(void)
 {
 	obs_frontend_remove_event_callback(frontend_event_cb, NULL);
-	obs_frontend_remove_dock("srtla_status_dock");
-	obs_frontend_remove_dock("srtla_multistream_dock");
 	pyleirl_shutdown();
+	srtla_force_stop_all();
+	rist_force_stop_all();
 	rist_free_log_handler();
 	srtla_free_log_handler();
 	obs_log(LOG_INFO, "plugin unloaded");

@@ -454,6 +454,15 @@ void MultistreamManager::stopAll()
 	}
 }
 
+void MultistreamManager::shutdown()
+{
+	obs_frontend_remove_event_callback(obsFrontendEvent, this);
+	for (auto t : targets) {
+		delete t;
+	}
+	targets.clear();
+}
+
 void MultistreamManager::obsFrontendEvent(enum obs_frontend_event event, void *private_data)
 {
 	auto mgr = static_cast<MultistreamManager *>(private_data);

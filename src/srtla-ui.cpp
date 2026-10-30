@@ -1525,6 +1525,7 @@ void SrtlaAutoSwitcher::start()
 void SrtlaAutoSwitcher::stop()
 {
 	timer->stop();
+	obs_frontend_remove_event_callback(handleFrontendEvent, this);
 	clearMonitoredAudioSources();
 }
 
