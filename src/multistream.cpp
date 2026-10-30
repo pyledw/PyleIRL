@@ -321,18 +321,14 @@ MultistreamManager &MultistreamManager::instance()
 	return inst;
 }
 
-MultistreamManager::MultistreamManager(QObject *parent) : QObject(parent)
+MultistreamManager::MultistreamManager(QObject *parent) : QObject(parent), frontendCallbackRegistered(true)
 {
 	obs_frontend_add_event_callback(obsFrontendEvent, this);
 }
 
 MultistreamManager::~MultistreamManager()
 {
-	obs_frontend_remove_event_callback(obsFrontendEvent, this);
-	for (auto t : targets) {
-		delete t;
-	}
-	targets.clear();
+	shutdown();
 }
 
 void MultistreamManager::loadConfig()
@@ -456,7 +452,10 @@ void MultistreamManager::stopAll()
 
 void MultistreamManager::shutdown()
 {
-	obs_frontend_remove_event_callback(obsFrontendEvent, this);
+	if (frontendCallbackRegistered) {
+		obs_frontend_remove_event_callback(obsFrontendEvent, this);
+		frontendCallbackRegistered = false;
+	}
 	for (auto t : targets) {
 		delete t;
 	}
@@ -474,5 +473,10 @@ void MultistreamManager::obsFrontendEvent(enum obs_frontend_event event, void *p
 		if (mgr->getSyncWithObs()) {
 			mgr->stopAll();
 		}
+	} else if (event == OBS_FRONTEND_EVENT_PROFILE_CHANGED) {
+		mgr->loadConfig();
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP ||
+		   event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING) {
+		mgr->stopAll();
 	}
 }

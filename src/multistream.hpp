@@ -96,6 +96,7 @@ private:
 
 	QVector<MultistreamTarget *> targets;
 	bool syncWithObs = false;
+	bool frontendCallbackRegistered = false;
 
 	static void obsFrontendEvent(enum obs_frontend_event event, void *private_data);
 };

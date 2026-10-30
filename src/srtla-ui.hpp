@@ -88,7 +88,7 @@ struct VolumeVisibilityRule {
 
 struct MonitoredAudioSource {
 	obs_volmeter_t *volmeter = nullptr;
-	obs_source_t *source = nullptr;
+	obs_weak_source_t *weak_source = nullptr;
 	float lastDb = -100.0f;
 	uint64_t lastUpdateTime = 0;
 };
@@ -182,6 +182,7 @@ private:
 	int volMatchDurationCounter;
 
 	QString originalSceneName;
+	bool frontendCallbackRegistered = false;
 
 	void loadRules();
 	void updateMonitoredAudioSources();

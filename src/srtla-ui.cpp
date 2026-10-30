@@ -1489,7 +1489,8 @@ SrtlaAutoSwitcher::SrtlaAutoSwitcher(QObject *parent)
 	  matchDurationCounter(0),
 	  visMatchDurationCounter(0),
 	  volMatchDurationCounter(0),
-	  activePrimaryPort(0)
+	  activePrimaryPort(0),
+	  frontendCallbackRegistered(true)
 {
 	connect(timer, &QTimer::timeout, this, &SrtlaAutoSwitcher::checkBitrate);
 	obs_frontend_add_event_callback(handleFrontendEvent, this);
@@ -1497,8 +1498,7 @@ SrtlaAutoSwitcher::SrtlaAutoSwitcher(QObject *parent)
 
 SrtlaAutoSwitcher::~SrtlaAutoSwitcher()
 {
-	obs_frontend_remove_event_callback(handleFrontendEvent, this);
-	clearMonitoredAudioSources();
+	stop();
 }
 
 void SrtlaAutoSwitcher::volmeterCallback(void *param, const float magnitude[MAX_AUDIO_CHANNELS],
@@ -1511,11 +1511,7 @@ void SrtlaAutoSwitcher::volmeterCallback(void *param, const float magnitude[MAX_
 	if (!mas)
 		return;
 
-	if (mas->source && obs_source_muted(mas->source)) {
-		mas->lastDb = -100.0f;
-		mas->lastUpdateTime = os_gettime_ns();
-		return;
-	}
+	// Muted check is performed in checkBitrate() using weak_source
 
 	float frame_max = -100.0f;
 	for (int c = 0; c < MAX_AUDIO_CHANNELS; c++) {
@@ -1550,9 +1546,9 @@ void SrtlaAutoSwitcher::clearMonitoredAudioSources()
 				obs_volmeter_destroy(mas->volmeter);
 				mas->volmeter = nullptr;
 			}
-			if (mas->source) {
-				obs_source_release(mas->source);
-				mas->source = nullptr;
+			if (mas->weak_source) {
+				obs_weak_source_release(mas->weak_source);
+				mas->weak_source = nullptr;
 			}
 			delete mas;
 		}
@@ -1584,10 +1580,19 @@ void SrtlaAutoSwitcher::updateMonitoredAudioSources()
 		},
 		&neededSources);
 
-	// Remove any sources no longer in rules
+	// Remove any sources no longer in rules or whose weak_source has expired
 	QList<QString> currentKeys = monitoredAudioSources.keys();
 	for (const QString &key : currentKeys) {
-		if (!neededSources.contains(key)) {
+		MonitoredAudioSource *existing = monitoredAudioSources.value(key, nullptr);
+		bool expired = true;
+		if (existing && existing->weak_source) {
+			obs_source_t *strong = obs_weak_source_get_source(existing->weak_source);
+			if (strong) {
+				expired = false;
+				obs_source_release(strong);
+			}
+		}
+		if (!neededSources.contains(key) || expired) {
 			MonitoredAudioSource *mas = monitoredAudioSources.take(key);
 			if (mas) {
 				if (mas->volmeter) {
@@ -1595,21 +1600,21 @@ void SrtlaAutoSwitcher::updateMonitoredAudioSources()
 					obs_volmeter_detach_source(mas->volmeter);
 					obs_volmeter_destroy(mas->volmeter);
 				}
-				if (mas->source) {
-					obs_source_release(mas->source);
+				if (mas->weak_source) {
+					obs_weak_source_release(mas->weak_source);
 				}
 				delete mas;
 			}
 		}
 	}
 
-	// Add any newly needed sources
+	// Add any newly needed sources using a weak reference so we never block scene collection cleanup
 	for (const QString &srcName : neededSources) {
 		if (!monitoredAudioSources.contains(srcName)) {
 			obs_source_t *src = obs_get_source_by_name(srcName.toUtf8().constData());
 			if (src) {
 				MonitoredAudioSource *mas = new MonitoredAudioSource();
-				mas->source = src;
+				mas->weak_source = obs_source_get_weak_source(src);
 				mas->lastDb = -100.0f;
 				mas->lastUpdateTime = os_gettime_ns();
 				mas->volmeter = obs_volmeter_create(OBS_FADER_LOG);
@@ -1617,6 +1622,8 @@ void SrtlaAutoSwitcher::updateMonitoredAudioSources()
 					obs_volmeter_add_callback(mas->volmeter, volmeterCallback, mas);
 					obs_volmeter_attach_source(mas->volmeter, src);
 				}
+				// Release the strong reference immediately!
+				obs_source_release(src);
 				monitoredAudioSources.insert(srcName, mas);
 			}
 		}
@@ -1639,6 +1646,13 @@ void SrtlaAutoSwitcher::handleFrontendEvent(enum obs_frontend_event event, void 
 		}
 		if (currentScene)
 			obs_source_release(currentScene);
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP ||
+		   event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING ||
+		   event == OBS_FRONTEND_EVENT_PROFILE_CHANGING) {
+		switcher->clearMonitoredAudioSources();
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED ||
+		   event == OBS_FRONTEND_EVENT_PROFILE_CHANGED) {
+		switcher->loadRules();
 	}
 }
 
@@ -1760,7 +1774,10 @@ void SrtlaAutoSwitcher::start()
 void SrtlaAutoSwitcher::stop()
 {
 	timer->stop();
-	obs_frontend_remove_event_callback(handleFrontendEvent, this);
+	if (frontendCallbackRegistered) {
+		obs_frontend_remove_event_callback(handleFrontendEvent, this);
+		frontendCallbackRegistered = false;
+	}
 	clearMonitoredAudioSources();
 }
 
@@ -1835,7 +1852,15 @@ void SrtlaAutoSwitcher::checkBitrate()
 		QString srcKey = it.key();
 		MonitoredAudioSource *mas = it.value();
 		if (mas) {
-			if (mas->source && obs_source_muted(mas->source)) {
+			bool isMuted = false;
+			if (mas->weak_source) {
+				obs_source_t *strong = obs_weak_source_get_source(mas->weak_source);
+				if (strong) {
+					isMuted = obs_source_muted(strong);
+					obs_source_release(strong);
+				}
+			}
+			if (isMuted) {
 				mas->lastDb = -100.0f;
 			} else if (now > mas->lastUpdateTime && (now - mas->lastUpdateTime > 1500000000ULL)) {
 				mas->lastDb = -100.0f;
