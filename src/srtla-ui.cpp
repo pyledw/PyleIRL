@@ -19,6 +19,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QHeaderView>
+#include <QResizeEvent>
+#include <QScrollBar>
 
 #include <obs.h>
 #include <util/config-file.h>
@@ -56,78 +58,131 @@ void rist_force_reload_by_name(const char *name);
 SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QWidget(parent)
 {
 	setObjectName("srtla_status_dock");
+	setMinimumSize(170, 110);
 
 	QVBoxLayout *mainLayout = new QVBoxLayout(this);
 	mainLayout->setContentsMargins(6, 6, 6, 6);
 	mainLayout->setSpacing(6);
 
-	// Compact summary bar
+	// Responsive modern summary header card
 	metricsLabel = new QLabel(this);
+	metricsLabel->setWordWrap(true);
+	metricsLabel->setMinimumWidth(80);
+	metricsLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
 	metricsLabel->setStyleSheet(
-		"QLabel { background-color: #1a1a1a; border: 1px solid #2d2d2d; border-radius: 4px; padding: 4px 8px; font-size: 11px; color: #cccccc; }");
+		"QLabel { "
+		"  background-color: #18191c; "
+		"  border: 1px solid #2e3138; "
+		"  border-left: 3px solid #4CAF50; "
+		"  border-radius: 5px; "
+		"  padding: 5px 8px; "
+		"  font-size: 11px; "
+		"  color: #dcddde; "
+		"}");
 	metricsLabel->setTextFormat(Qt::RichText);
 	metricsLabel->setText("<span style='color:#4CAF50; font-weight:bold;'>● Listening</span> &nbsp;&bull;&nbsp; <b>Devices:</b> 0 &nbsp;&bull;&nbsp; <b>Links:</b> 0 &nbsp;&bull;&nbsp; <b>Total:</b> 0 Kbps");
 	mainLayout->addWidget(metricsLabel);
 
 	// Resizable vertical splitter between Receiver Controls and Connections
 	splitter = new QSplitter(Qt::Vertical, this);
-	splitter->setChildrenCollapsible(false);
+	splitter->setChildrenCollapsible(true);
+	splitter->setHandleWidth(6);
 	splitter->setStyleSheet(
-		"QSplitter::handle:vertical { background-color: #333333; height: 5px; margin: 2px 0px; border-radius: 2px; } "
+		"QSplitter::handle:vertical { background-color: #2b2d31; height: 4px; margin: 1px 24px; border-radius: 2px; } "
 		"QSplitter::handle:vertical:hover { background-color: #4CAF50; }");
 
-	// Compact Receivers & Controls Table (primary section with priority)
+	const QString sharedViewStyle =
+		"QTableWidget, QTreeWidget { "
+		"  background-color: #1b1c20; "
+		"  alternate-background-color: #202226; "
+		"  color: #dcddde; "
+		"  border: 1px solid #2e3138; "
+		"  border-radius: 5px; "
+		"  font-size: 11px; "
+		"  gridline-color: #26282e; "
+		"  outline: none; "
+		"} "
+		"QTableWidget::item, QTreeWidget::item { "
+		"  padding: 2px 5px; "
+		"  border: none; "
+		"} "
+		"QTableWidget::item:hover, QTreeWidget::item:hover { "
+		"  background-color: #282b30; "
+		"} "
+		"QHeaderView::section { "
+		"  background-color: #23252b; "
+		"  color: #b9bbbe; "
+		"  padding: 4px 6px; "
+		"  font-size: 10px; "
+		"  font-weight: 600; "
+		"  text-transform: uppercase; "
+		"  border: none; "
+		"  border-bottom: 1px solid #32353d; "
+		"  border-right: 1px solid #2b2d33; "
+		"} "
+		"QScrollBar:vertical { "
+		"  background: #18191c; width: 7px; margin: 0px; border-radius: 3px; "
+		"} "
+		"QScrollBar::handle:vertical { "
+		"  background: #3a3d45; min-height: 20px; border-radius: 3px; "
+		"} "
+		"QScrollBar::handle:vertical:hover { background: #4e525c; } "
+		"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; } "
+		"QScrollBar:horizontal { "
+		"  background: #18191c; height: 7px; margin: 0px; border-radius: 3px; "
+		"} "
+		"QScrollBar::handle:horizontal { "
+		"  background: #3a3d45; min-width: 20px; border-radius: 3px; "
+		"} "
+		"QScrollBar::handle:horizontal:hover { background: #4e525c; } "
+		"QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }";
+
+	// Compact Receivers & Controls Table
 	receiversTable = new QTableWidget(splitter);
 	receiversTable->setColumnCount(3);
 	receiversTable->setHorizontalHeaderLabels(QStringList() << "Receiver" << "Controls" << "Status & Health");
-	receiversTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+	receiversTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Interactive);
 	receiversTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
 	receiversTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
 	receiversTable->horizontalHeader()->setStretchLastSection(true);
-	receiversTable->horizontalHeader()->setMinimumSectionSize(60);
+	receiversTable->horizontalHeader()->setMinimumSectionSize(44);
 	receiversTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	receiversTable->setSelectionMode(QAbstractItemView::NoSelection);
+	receiversTable->setFocusPolicy(Qt::NoFocus);
 	receiversTable->setAlternatingRowColors(true);
-	receiversTable->setStyleSheet(
-		"QTableWidget { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 3px; font-size: 11px; } "
-		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 3px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
+	receiversTable->setShowGrid(false);
+	receiversTable->setWordWrap(false);
+	receiversTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+	receiversTable->setStyleSheet(sharedViewStyle);
 	receiversTable->verticalHeader()->setVisible(false);
-	receiversTable->verticalHeader()->setDefaultSectionSize(34);
+	receiversTable->verticalHeader()->setDefaultSectionSize(32);
+	receiversTable->setMinimumHeight(48);
 	receiversTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
-	// Condensed Active Connections & KBPS Tree (minimized by default)
+	// Condensed Active Connections & KBPS Tree
 	treeWidget = new QTreeWidget(splitter);
 	treeWidget->setHeaderLabels(QStringList() << "Active Connection / Telemetry" << "Bitrate");
 	treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
 	treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
 	treeWidget->header()->setStretchLastSection(false);
+	treeWidget->header()->setMinimumSectionSize(55);
 	treeWidget->setAlternatingRowColors(true);
-	treeWidget->setStyleSheet(
-		"QTreeWidget { background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333; border-radius: 3px; font-size: 11px; } "
-		"QHeaderView::section { background-color: #2d2d2d; color: white; padding: 3px 6px; font-size: 11px; font-weight: bold; border-right: 1px solid #3d3d3d; }");
+	treeWidget->setFocusPolicy(Qt::NoFocus);
+	treeWidget->setIndentation(14);
+	treeWidget->setMinimumHeight(44);
+	treeWidget->setStyleSheet(sharedViewStyle);
 
 	splitter->addWidget(receiversTable);
 	splitter->addWidget(treeWidget);
-	splitter->setCollapsible(0, false);
-	splitter->setStretchFactor(0, 0); // Table takes its content size
-	splitter->setStretchFactor(1, 1); // Tree expands to fill remaining space
+	splitter->setStretchFactor(0, 1);
+	splitter->setStretchFactor(1, 1);
 
 	QSettings settings("obs-studio", "PyleIRL");
 	QByteArray splitterState = settings.value("status_splitter_state_v2").toByteArray();
 	if (!splitterState.isEmpty()) {
 		splitter->restoreState(splitterState);
 	} else {
-		// Responsive initial split: receiver table compact on top, active connections tree below
-		splitter->setSizes(QList<int>() << 110 << 160);
-	}
-
-	QByteArray tableHeaderState = settings.value("status_table_header_v2").toByteArray();
-	if (!tableHeaderState.isEmpty()) {
-		receiversTable->horizontalHeader()->restoreState(tableHeaderState);
-	}
-	QByteArray treeHeaderState = settings.value("status_tree_header_v2").toByteArray();
-	if (!treeHeaderState.isEmpty()) {
-		treeWidget->header()->restoreState(treeHeaderState);
+		splitter->setSizes(QList<int>() << 115 << 150);
 	}
 
 	connect(splitter, &QSplitter::splitterMoved, this, &SrtlaStatusWidget::onSplitterMoved);
@@ -139,6 +194,7 @@ SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QWidget(parent)
 	connect(updateTimer, &QTimer::timeout, this, &SrtlaStatusWidget::updateStatus);
 	updateTimer->start(500); // 500ms
 
+	applyResponsiveLayout(width());
 	updateStatus(); // initial update
 }
 
@@ -147,12 +203,6 @@ SrtlaStatusWidget::~SrtlaStatusWidget()
 	QSettings settings("obs-studio", "PyleIRL");
 	if (splitter) {
 		settings.setValue("status_splitter_state_v2", splitter->saveState());
-	}
-	if (receiversTable && receiversTable->horizontalHeader()) {
-		settings.setValue("status_table_header_v2", receiversTable->horizontalHeader()->saveState());
-	}
-	if (treeWidget && treeWidget->header()) {
-		settings.setValue("status_tree_header_v2", treeWidget->header()->saveState());
 	}
 }
 
@@ -163,6 +213,84 @@ void SrtlaStatusWidget::onSplitterMoved(int pos, int index)
 	QSettings settings("obs-studio", "PyleIRL");
 	if (splitter) {
 		settings.setValue("status_splitter_state_v2", splitter->saveState());
+	}
+}
+
+void SrtlaStatusWidget::resizeEvent(QResizeEvent *event)
+{
+	QWidget::resizeEvent(event);
+	applyResponsiveLayout(event->size().width());
+}
+
+void SrtlaStatusWidget::applyResponsiveLayout(int w)
+{
+	bool newCompact = (w < 430);
+	bool newUltraCompact = (w < 300);
+
+	if (layout()) {
+		int m = newUltraCompact ? 3 : 6;
+		layout()->setContentsMargins(m, m, m, m);
+		layout()->setSpacing(newUltraCompact ? 4 : 6);
+	}
+
+	if (receiversTable && receiversTable->horizontalHeader()) {
+		receiversTable->setColumnHidden(2, newUltraCompact);
+		if (newUltraCompact) {
+			receiversTable->setHorizontalHeaderLabels(QStringList() << "Receiver" << "Act" << "Status");
+			receiversTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+			receiversTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+			receiversTable->horizontalHeader()->setStretchLastSection(false);
+		} else if (newCompact) {
+			receiversTable->setHorizontalHeaderLabels(QStringList() << "Receiver" << "Controls" << "Status");
+			receiversTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+			receiversTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+			receiversTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+			receiversTable->horizontalHeader()->setStretchLastSection(true);
+		} else {
+			receiversTable->setHorizontalHeaderLabels(QStringList() << "Receiver" << "Controls" << "Status & Health");
+			receiversTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+			receiversTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+			receiversTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+			receiversTable->horizontalHeader()->setStretchLastSection(true);
+		}
+
+		// Update existing row buttons immediately on resize
+		for (int r = 0; r < receiversTable->rowCount(); ++r) {
+			QWidget *actionWidget = receiversTable->cellWidget(r, 1);
+			if (!actionWidget) continue;
+			if (QHBoxLayout *al = qobject_cast<QHBoxLayout *>(actionWidget->layout())) {
+				al->setContentsMargins(newUltraCompact ? 2 : 4, 2, newUltraCompact ? 2 : 4, 2);
+				al->setSpacing(newUltraCompact ? 2 : 4);
+			}
+			QPushButton *startBtn = actionWidget->findChild<QPushButton *>("startBtn");
+			QPushButton *stopBtn = actionWidget->findChild<QPushButton *>("stopBtn");
+			QPushButton *restartBtn = actionWidget->findChild<QPushButton *>("restartBtn");
+			QPushButton *fixBtn = actionWidget->findChild<QPushButton *>("fixBtn");
+			if (startBtn) startBtn->setText(newCompact ? "▶" : "▶ Start");
+			if (stopBtn) stopBtn->setText(newCompact ? "⏹" : "⏹ Stop");
+			if (restartBtn) restartBtn->setText(newCompact ? "⟳" : "⟳ Restart");
+			if (fixBtn) fixBtn->setText(newCompact ? "⚡" : "⚡ Fix A/V");
+		}
+	}
+
+	if (treeWidget && treeWidget->header()) {
+		if (newUltraCompact) {
+			treeWidget->setHeaderLabels(QStringList() << "Link / Health" << "Kbps");
+			treeWidget->setIndentation(10);
+		} else if (newCompact) {
+			treeWidget->setHeaderLabels(QStringList() << "Connection / Health" << "Bitrate");
+			treeWidget->setIndentation(12);
+		} else {
+			treeWidget->setHeaderLabels(QStringList() << "Active Connection / Telemetry" << "Bitrate");
+			treeWidget->setIndentation(14);
+		}
+	}
+
+	bool modeChanged = (newCompact != isCompact) || (newUltraCompact != isUltraCompact);
+	isCompact = newCompact;
+	isUltraCompact = newUltraCompact;
+	if (modeChanged) {
+		updateStatus();
 	}
 }
 
@@ -187,14 +315,14 @@ void SrtlaStatusWidget::updateStatus()
 
 		srtla_get_connection_stats(&is_listening, &groups, &connections);
 		srtla_get_connection_details(&listen_port, &failed_conns, details_buffer, sizeof(details_buffer));
-		
+
 		bool rist_listening = false;
 		int rist_groups = 0;
 		int rist_conns = 0;
 		char rist_details_buffer[16384] = {0};
 		rist_get_connection_stats(&rist_listening, &rist_groups, &rist_conns);
 		rist_get_connection_details(rist_details_buffer, sizeof(rist_details_buffer));
-		
+
 		is_listening = is_listening || rist_listening;
 		groups += rist_groups;
 		connections += rist_conns;
@@ -208,7 +336,7 @@ void SrtlaStatusWidget::updateStatus()
 		QJsonDocument rDoc = QJsonDocument::fromJson(QByteArray(receivers_buffer));
 		QJsonDocument ristRDoc = QJsonDocument::fromJson(QByteArray(rist_receivers_buffer));
 		QJsonArray rArray;
-		
+
 		if (rDoc.isArray()) {
 			rArray = rDoc.array();
 		}
@@ -230,7 +358,7 @@ void SrtlaStatusWidget::updateStatus()
 				long long drift_ms = rObj.contains("audio_drift_ms") ? (long long)rObj["audio_drift_ms"].toDouble() : 0;
 				int resets = rObj.contains("auto_reset_count") ? rObj["auto_reset_count"].toInt() : 0;
 				bool audio_starved = rObj.contains("audio_starved") && rObj["audio_starved"].toVariant().toBool();
-				
+
 				currentReceiverNames.insert(name);
 
 				int foundRow = -1;
@@ -245,51 +373,60 @@ void SrtlaStatusWidget::updateStatus()
 				if (foundRow == -1) {
 					foundRow = receiversTable->rowCount();
 					receiversTable->insertRow(foundRow);
-					receiversTable->setRowHeight(foundRow, 34);
+					receiversTable->setRowHeight(foundRow, 32);
 
-					QTableWidgetItem *nameItem = new QTableWidgetItem(QString("[%1] %2 (%3)").arg(protocol, name, port));
+					QTableWidgetItem *nameItem = new QTableWidgetItem();
 					nameItem->setData(Qt::UserRole, name);
 					nameItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
 					QTableWidgetItem *statusItem = new QTableWidgetItem();
 					statusItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
-					
+
 					receiversTable->setItem(foundRow, 0, nameItem);
-					receiversTable->setItem(foundRow, 2, statusItem); // Status & Health in Column 2
+					receiversTable->setItem(foundRow, 2, statusItem);
 
 					QWidget *actionWidget = new QWidget();
+					actionWidget->setStyleSheet("background: transparent;");
 					QHBoxLayout *actionLayout = new QHBoxLayout(actionWidget);
-					actionLayout->setContentsMargins(4, 2, 4, 2);
-					actionLayout->setSpacing(5);
+					actionLayout->setContentsMargins(isUltraCompact ? 2 : 4, 2, isUltraCompact ? 2 : 4, 2);
+					actionLayout->setSpacing(isUltraCompact ? 2 : 4);
 
-					QPushButton *startBtn = new QPushButton("▶ Start");
-					QPushButton *stopBtn = new QPushButton("⏹ Stop");
-					QPushButton *restartBtn = new QPushButton("⟳ Restart");
-					QPushButton *fixBtn = new QPushButton("⚡ Fix A/V");
+					QPushButton *startBtn = new QPushButton(isCompact ? "▶" : "▶ Start");
+					QPushButton *stopBtn = new QPushButton(isCompact ? "⏹" : "⏹ Stop");
+					QPushButton *restartBtn = new QPushButton(isCompact ? "⟳" : "⟳ Restart");
+					QPushButton *fixBtn = new QPushButton(isCompact ? "⚡" : "⚡ Fix A/V");
 
 					startBtn->setObjectName("startBtn");
 					stopBtn->setObjectName("stopBtn");
 					restartBtn->setObjectName("restartBtn");
 					fixBtn->setObjectName("fixBtn");
-					fixBtn->setToolTip("Rapidly reload the internal player to clear audio lag / desync without dropping the SRTLA connection");
+
+					startBtn->setCursor(Qt::PointingHandCursor);
+					stopBtn->setCursor(Qt::PointingHandCursor);
+					restartBtn->setCursor(Qt::PointingHandCursor);
+					fixBtn->setCursor(Qt::PointingHandCursor);
+
+					startBtn->setToolTip("Start this receiver");
+					stopBtn->setToolTip("Stop this receiver");
 					restartBtn->setToolTip("Full restart of the receiver thread and connection");
+					fixBtn->setToolTip("Rapidly reload the internal player to clear audio lag / desync without dropping the SRTLA connection");
 
 					startBtn->setStyleSheet(
-						"QPushButton { background-color: #2e7d32; color: white; font-weight: bold; border: 1px solid #388e3c; border-radius: 3px; padding: 3px 9px; font-size: 11px; } "
-						"QPushButton:hover { background-color: #388e3c; } "
-						"QPushButton:disabled { background-color: #252525; color: #555555; border: 1px solid #303030; }");
+						"QPushButton { background-color: #238636; color: #ffffff; font-weight: 600; border: 1px solid #2ea043; border-radius: 4px; padding: 2px 7px; font-size: 11px; min-width: 18px; } "
+						"QPushButton:hover { background-color: #2ea043; } "
+						"QPushButton:disabled { background-color: #23252b; color: #555860; border: 1px solid #2b2e36; }");
 					stopBtn->setStyleSheet(
-						"QPushButton { background-color: #c62828; color: white; font-weight: bold; border: 1px solid #d32f2f; border-radius: 3px; padding: 3px 9px; font-size: 11px; } "
-						"QPushButton:hover { background-color: #d32f2f; } "
-						"QPushButton:disabled { background-color: #252525; color: #555555; border: 1px solid #303030; }");
+						"QPushButton { background-color: #da3633; color: #ffffff; font-weight: 600; border: 1px solid #f85149; border-radius: 4px; padding: 2px 7px; font-size: 11px; min-width: 18px; } "
+						"QPushButton:hover { background-color: #f85149; } "
+						"QPushButton:disabled { background-color: #23252b; color: #555860; border: 1px solid #2b2e36; }");
 					restartBtn->setStyleSheet(
-						"QPushButton { background-color: #333333; color: #d4d4d4; border: 1px solid #444444; border-radius: 3px; padding: 3px 7px; font-size: 11px; } "
-						"QPushButton:hover { background-color: #444444; color: white; } "
-						"QPushButton:disabled { background-color: #222222; color: #555555; border: 1px solid #2a2a2a; }");
+						"QPushButton { background-color: #2b2d34; color: #dcddde; border: 1px solid #3c3f49; border-radius: 4px; padding: 2px 6px; font-size: 11px; min-width: 18px; } "
+						"QPushButton:hover { background-color: #383b44; color: #ffffff; border-color: #4f5461; } "
+						"QPushButton:disabled { background-color: #202226; color: #4c4f57; border: 1px solid #282a30; }");
 					fixBtn->setStyleSheet(
-						"QPushButton { background-color: #333333; color: #d4d4d4; border: 1px solid #444444; border-radius: 3px; padding: 3px 7px; font-size: 11px; } "
-						"QPushButton:hover { background-color: #444444; color: white; } "
-						"QPushButton:disabled { background-color: #222222; color: #555555; border: 1px solid #2a2a2a; }");
+						"QPushButton { background-color: #2b2d34; color: #f0b232; border: 1px solid #3c3f49; border-radius: 4px; padding: 2px 6px; font-size: 11px; min-width: 18px; } "
+						"QPushButton:hover { background-color: #383b44; color: #ffd166; border-color: #f0b232; } "
+						"QPushButton:disabled { background-color: #202226; color: #4c4f57; border: 1px solid #282a30; }");
 
 					QObject::connect(startBtn, &QPushButton::clicked,
 							 [name, protocol]() {
@@ -314,16 +451,46 @@ void SrtlaStatusWidget::updateStatus()
 
 					actionLayout->addWidget(startBtn);
 					actionLayout->addWidget(stopBtn);
-					actionLayout->addSpacing(3);
 					actionLayout->addWidget(restartBtn);
 					actionLayout->addWidget(fixBtn);
-					receiversTable->setCellWidget(foundRow, 1, actionWidget); // Controls in Column 1 (Front & Center!)
+					receiversTable->setCellWidget(foundRow, 1, actionWidget);
+				}
+
+				QString fullTooltip = QString("Protocol: %1\nReceiver: %2\nListen Port: %3\nStatus: %4\nAudio Drift: %5 ms\nAuto-Resets: %6\nAudio Starved: %7")
+					.arg(protocol, name, port)
+					.arg(running ? "Running" : "Stopped")
+					.arg(drift_ms)
+					.arg(resets)
+					.arg(audio_starved ? "Yes" : "No");
+
+				QColor stateColor("#888888");
+				QString stateDot = "○";
+				if (running) {
+					if (audio_starved || std::abs(drift_ms) > 500) {
+						stateColor = QColor("#f85149"); // Red
+						stateDot = "⚠️";
+					} else if (std::abs(drift_ms) > 100) {
+						stateColor = QColor("#f0b232"); // Amber
+						stateDot = "●";
+					} else {
+						stateColor = QColor("#3fb950"); // Green
+						stateDot = "●";
+					}
 				}
 
 				QTableWidgetItem *nameItem = receiversTable->item(foundRow, 0);
 				if (nameItem) {
-					nameItem->setText(QString("[%1] %2 (%3)").arg(protocol, name, port));
-					nameItem->setToolTip(QString("Protocol: %1\nReceiver: %2\nPort: %3").arg(protocol, name, port));
+					if (isUltraCompact) {
+						nameItem->setText(QString("%1 %2 :%3").arg(stateDot, name, port));
+						nameItem->setForeground(QBrush(running ? stateColor : QColor("#999999")));
+					} else if (isCompact) {
+						nameItem->setText(QString("%1 :%2").arg(name, port));
+						nameItem->setForeground(QBrush(QColor("#dcddde")));
+					} else {
+						nameItem->setText(QString("[%1] %2 (%3)").arg(protocol, name, port));
+						nameItem->setForeground(QBrush(QColor("#dcddde")));
+					}
+					nameItem->setToolTip(fullTooltip);
 				}
 
 				QTableWidgetItem *statusItem = receiversTable->item(foundRow, 2);
@@ -331,25 +498,20 @@ void SrtlaStatusWidget::updateStatus()
 					QString statusText;
 					if (running) {
 						if (audio_starved || std::abs(drift_ms) > 500) {
-							statusText = QString("⚠️ Desync (%1ms) • Resets: %2").arg(drift_ms).arg(resets);
-							statusItem->setForeground(QBrush(QColor("#F44336"))); // Red
-						} else if (std::abs(drift_ms) > 100) {
-							statusText = QString("● Running • %1ms drift • Resets: %2").arg(drift_ms).arg(resets);
-							statusItem->setForeground(QBrush(QColor("#FFB300"))); // Amber
+							statusText = isCompact
+								? QString("⚠️ %1ms (R:%2)").arg(drift_ms).arg(resets)
+								: QString("⚠️ Desync (%1ms) • Resets: %2").arg(drift_ms).arg(resets);
 						} else {
-							statusText = QString("● Running • %1ms drift • Resets: %2").arg(drift_ms).arg(resets);
-							statusItem->setForeground(QBrush(QColor("#4CAF50"))); // Green
+							statusText = isCompact
+								? QString("● %1ms (R:%2)").arg(drift_ms).arg(resets)
+								: QString("● Running • %1ms drift • Resets: %2").arg(drift_ms).arg(resets);
 						}
 					} else {
 						statusText = "○ Stopped";
-						statusItem->setForeground(QBrush(QColor("#888888")));
 					}
+					statusItem->setForeground(QBrush(stateColor));
 					statusItem->setText(statusText);
-					statusItem->setToolTip(QString("Status: %1\nAudio Drift: %2 ms\nAuto-Resets: %3\nAudio Starved: %4")
-						.arg(running ? "Running" : "Stopped")
-						.arg(drift_ms)
-						.arg(resets)
-						.arg(audio_starved ? "Yes" : "No"));
+					statusItem->setToolTip(fullTooltip);
 				}
 
 				QWidget *actionWidget = receiversTable->cellWidget(foundRow, 1);
@@ -359,6 +521,14 @@ void SrtlaStatusWidget::updateStatus()
 					QPushButton *restartBtn = actionWidget->findChild<QPushButton*>("restartBtn");
 					QPushButton *fixBtn = actionWidget->findChild<QPushButton*>("fixBtn");
 					if (startBtn && stopBtn) {
+						if (isCompact) {
+							// In compact/ultra-compact mode, only show the actionable toggle button to save horizontal space
+							startBtn->setVisible(!running);
+							stopBtn->setVisible(running);
+						} else {
+							startBtn->setVisible(true);
+							stopBtn->setVisible(true);
+						}
 						startBtn->setEnabled(!running);
 						stopBtn->setEnabled(running);
 					}
@@ -374,10 +544,8 @@ void SrtlaStatusWidget::updateStatus()
 					receiversTable->removeRow(r);
 				}
 			}
-
-			int totalRows = receiversTable->rowCount();
-			int calculatedMinHeight = qMax(38, totalRows * 34 + 26);
-			receiversTable->setMinimumHeight(calculatedMinHeight);
+		} else {
+			receiversTable->setRowCount(0);
 		}
 
 		QJsonDocument doc = QJsonDocument::fromJson(QByteArray(details_buffer));
@@ -386,7 +554,7 @@ void SrtlaStatusWidget::updateStatus()
 		if (doc.isObject() || ristDoc.isObject()) {
 			QJsonObject root = doc.object();
 			QJsonArray groupsArray = root["groups"].toArray();
-			
+
 			if (ristDoc.isObject()) {
 				QJsonArray ristGroups = ristDoc.object()["groups"].toArray();
 				for (int i = 0; i < ristGroups.size(); i++) {
@@ -404,7 +572,11 @@ void SrtlaStatusWidget::updateStatus()
 				QString uniqueGroupIdStr = listenPortStr + "_" + groupIdStr;
 				currentGroupIds.insert(uniqueGroupIdStr);
 
-				QString nodeName = "Port " + listenPortStr + " (Device #" + groupIdStr + ")";
+				QString nodeName = isUltraCompact
+					? QString(":%1 (#%2)").arg(listenPortStr, groupIdStr)
+					: (isCompact
+						? QString("Port %1 (#%2)").arg(listenPortStr, groupIdStr)
+						: QString("Port %1 (Device #%2)").arg(listenPortStr, groupIdStr));
 
 				QTreeWidgetItem *groupItem = nullptr;
 				for (int k = 0; k < treeWidget->topLevelItemCount(); ++k) {
@@ -413,7 +585,7 @@ void SrtlaStatusWidget::updateStatus()
 						break;
 					}
 				}
-				
+
 				if (!groupItem) {
 					groupItem = new QTreeWidgetItem(treeWidget);
 					groupItem->setData(0, Qt::UserRole, uniqueGroupIdStr);
@@ -426,15 +598,24 @@ void SrtlaStatusWidget::updateStatus()
 					int retries = gObj["retries"].toInt();
 					int missing_q = gObj["missing_queue"].toInt();
 					int rtt = gObj["rtt"].toInt();
-					nodeName += QString("  •  Q: %1%  •  L: %2  •  Buf: %3ms")
-						.arg(quality, 0, 'f', 0)
-						.arg(lost)
-						.arg(missing_q);
-					if (retries > 0) {
-						nodeName += QString("  •  R: %1").arg(retries);
-					}
-					if (rtt > 0) {
-						nodeName += QString("  •  %1ms").arg(rtt);
+
+					if (isUltraCompact) {
+						nodeName += QString(" • Q:%1%").arg(quality, 0, 'f', 0);
+						if (rtt > 0) nodeName += QString(" • %1ms").arg(rtt);
+					} else if (isCompact) {
+						nodeName += QString(" • Q:%1% • L:%2").arg(quality, 0, 'f', 0).arg(lost);
+						if (rtt > 0) nodeName += QString(" • %1ms").arg(rtt);
+					} else {
+						nodeName += QString("  •  Q: %1%  •  L: %2  •  Buf: %3ms")
+							.arg(quality, 0, 'f', 0)
+							.arg(lost)
+							.arg(missing_q);
+						if (retries > 0) {
+							nodeName += QString("  •  R: %1").arg(retries);
+						}
+						if (rtt > 0) {
+							nodeName += QString("  •  %1ms").arg(rtt);
+						}
 					}
 					groupItem->setToolTip(0, QString("Device #%1 (Port %2)\nLink Quality: %3%\nLost Packets: %4\nRetries: %5\nQueue Buffer: %6 ms\nRTT: %7 ms")
 						.arg(groupIdStr)
@@ -447,11 +628,11 @@ void SrtlaStatusWidget::updateStatus()
 				}
 
 				if (srtla_is_audio_starved(listenPortStr.toInt())) {
-					groupItem->setText(0, nodeName + "  [⚠️ DESYNC]");
-					groupItem->setForeground(0, QBrush(QColor("#F44336"))); // Red
+					groupItem->setText(0, nodeName + (isUltraCompact ? " ⚠️" : "  [⚠️ DESYNC]"));
+					groupItem->setForeground(0, QBrush(QColor("#f85149")));
 				} else {
 					groupItem->setText(0, nodeName);
-					groupItem->setForeground(0, QBrush(QColor("#d4d4d4"))); // Default
+					groupItem->setForeground(0, QBrush(QColor("#dcddde")));
 				}
 
 				QJsonArray connsArray = gObj["conns"].toArray();
@@ -483,12 +664,15 @@ void SrtlaStatusWidget::updateStatus()
 					if (!connItem) {
 						connItem = new QTreeWidgetItem(groupItem);
 						connItem->setText(0, ip + ":" + port);
+						connItem->setForeground(0, QBrush(QColor("#9ca3af")));
 					}
-					connItem->setText(1, QString::number(cKbps, 'f', 1) + " Kbps");
+					connItem->setText(1, QString::number(cKbps, 'f', isUltraCompact ? 0 : 1) + " Kbps");
+					connItem->setForeground(1, QBrush(cKbps > 10.0 ? QColor("#3fb950") : QColor("#888888")));
 				}
 
 				totalBitrateKbps += calculatedSumKbps;
-				groupItem->setText(1, QString::number(calculatedSumKbps, 'f', 1) + " Kbps");
+				groupItem->setText(1, QString::number(calculatedSumKbps, 'f', isUltraCompact ? 0 : 1) + " Kbps");
+				groupItem->setForeground(1, QBrush(calculatedSumKbps > 10.0 ? QColor("#3fb950") : QColor("#b9bbbe")));
 
 				// Remove disconnected children
 				for (int k = groupItem->childCount() - 1; k >= 0; k--) {
@@ -510,16 +694,52 @@ void SrtlaStatusWidget::updateStatus()
 			}
 		}
 
-		QString summaryText = QString("<span style='color:%1; font-weight:bold;'>● %2</span> &nbsp;&bull;&nbsp; <b>Devices:</b> %3 &nbsp;&bull;&nbsp; <b>Links:</b> %4 &nbsp;&bull;&nbsp; <b>Total:</b> <span style='color:#4CAF50; font-weight:bold;'>%5 Kbps</span>")
-			.arg(is_listening ? "#4CAF50" : "#888888")
+		QString borderAccent = is_listening ? (connections > 0 ? "#3fb950" : "#2ea043") : "#555860";
+		metricsLabel->setStyleSheet(QString(
+			"QLabel { "
+			"  background-color: #18191c; "
+			"  border: 1px solid #2e3138; "
+			"  border-left: 3px solid %1; "
+			"  border-radius: 5px; "
+			"  padding: %2; "
+			"  font-size: 11px; "
+			"  color: #dcddde; "
+			"}")
+			.arg(borderAccent)
+			.arg(isUltraCompact ? "3px 6px" : "5px 8px"));
+
+		QString summaryText;
+		if (isUltraCompact) {
+			summaryText = QString("<span style='color:%1; font-weight:bold;'>● %2</span> &bull; <b>%3</b>D/<b>%4</b>L &bull; <span style='color:#3fb950; font-weight:bold;'>%5k</span>")
+				.arg(is_listening ? "#3fb950" : "#888888")
+				.arg(is_listening ? "Live" : "Idle")
+				.arg(groups)
+				.arg(connections)
+				.arg(QString::number(totalBitrateKbps, 'f', 0));
+		} else if (isCompact) {
+			summaryText = QString("<span style='color:%1; font-weight:bold;'>● %2</span> &nbsp;&bull;&nbsp; <b>Dev:</b> %3 &nbsp;&bull;&nbsp; <b>Links:</b> %4 &nbsp;&bull;&nbsp; <span style='color:#3fb950; font-weight:bold;'>%5 Kbps</span>")
+				.arg(is_listening ? "#3fb950" : "#888888")
+				.arg(is_listening ? "Listening" : "Idle")
+				.arg(groups)
+				.arg(connections)
+				.arg(QString::number(totalBitrateKbps, 'f', 0));
+		} else {
+			summaryText = QString("<span style='color:%1; font-weight:bold;'>● %2</span> &nbsp;&bull;&nbsp; <b>Devices:</b> %3 &nbsp;&bull;&nbsp; <b>Links:</b> %4 &nbsp;&bull;&nbsp; <b>Total:</b> <span style='color:#3fb950; font-weight:bold;'>%5 Kbps</span>")
+				.arg(is_listening ? "#3fb950" : "#888888")
+				.arg(is_listening ? "Listening" : "Idle")
+				.arg(groups)
+				.arg(connections)
+				.arg(QString::number(totalBitrateKbps, 'f', 0));
+		}
+		metricsLabel->setText(summaryText);
+		metricsLabel->setToolTip(QString("Status: %1\nConnected Devices: %2\nActive Sub-Links: %3\nCombined Bitrate: %4 Kbps")
 			.arg(is_listening ? "Listening" : "Idle")
 			.arg(groups)
 			.arg(connections)
-			.arg(QString::number(totalBitrateKbps, 'f', 0));
-		metricsLabel->setText(summaryText);
+			.arg(QString::number(totalBitrateKbps, 'f', 1)));
 
 	} catch (...) {
-		metricsLabel->setText("<span style='color:red; font-weight:bold;'>● Backend Error</span>");
+		metricsLabel->setText("<span style='color:#f85149; font-weight:bold;'>● Backend Error</span>");
 		treeWidget->clear();
 		QTreeWidgetItem *errItem = new QTreeWidgetItem(treeWidget);
 		errItem->setText(0, "A severe exception was caught.");
@@ -2335,67 +2555,413 @@ void SrtlaMultistreamDialog::saveSettings()
 SrtlaMultistreamDock::SrtlaMultistreamDock(QWidget *parent) : QWidget(parent)
 {
 	setObjectName("srtla_multistream_dock");
+	setMinimumSize(170, 95);
 
 	QVBoxLayout *layout = new QVBoxLayout(this);
+	layout->setContentsMargins(6, 6, 6, 6);
+	layout->setSpacing(6);
 
-	statusTable = new QTableWidget();
-	statusTable->setColumnCount(4);
-	statusTable->setHorizontalHeaderLabels(QStringList() << "Name" << "Status" << "Start" << "Stop");
+	// Top Header Bar: Status summary + Quick All/Settings actions
+	QWidget *headerWidget = new QWidget(this);
+	QHBoxLayout *headerLayout = new QHBoxLayout(headerWidget);
+	headerLayout->setContentsMargins(0, 0, 0, 0);
+	headerLayout->setSpacing(4);
+
+	summaryLabel = new QLabel(headerWidget);
+	summaryLabel->setWordWrap(true);
+	summaryLabel->setMinimumWidth(60);
+	summaryLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+	summaryLabel->setTextFormat(Qt::RichText);
+	summaryLabel->setStyleSheet(
+		"QLabel { "
+		"  background-color: #18191c; "
+		"  border: 1px solid #2e3138; "
+		"  border-left: 3px solid #555860; "
+		"  border-radius: 5px; "
+		"  padding: 4px 8px; "
+		"  font-size: 11px; "
+		"  color: #dcddde; "
+		"}");
+	summaryLabel->setText("<span style='color:#888888; font-weight:bold;'>○ Idle</span> &nbsp;&bull;&nbsp; <b>Active:</b> 0/0");
+	headerLayout->addWidget(summaryLabel, 1);
+
+	startAllBtn = new QPushButton("▶ All", headerWidget);
+	stopAllBtn = new QPushButton("⏹ All", headerWidget);
+	configBtn = new QPushButton("⚙", headerWidget);
+
+	startAllBtn->setCursor(Qt::PointingHandCursor);
+	stopAllBtn->setCursor(Qt::PointingHandCursor);
+	configBtn->setCursor(Qt::PointingHandCursor);
+
+	startAllBtn->setToolTip("Start all enabled multistream targets");
+	stopAllBtn->setToolTip("Stop all running multistream targets");
+	configBtn->setToolTip("Open Multistream Configuration");
+
+	startAllBtn->setStyleSheet(
+		"QPushButton { background-color: #238636; color: #ffffff; font-weight: 600; border: 1px solid #2ea043; border-radius: 4px; padding: 3px 7px; font-size: 11px; } "
+		"QPushButton:hover { background-color: #2ea043; } "
+		"QPushButton:disabled { background-color: #23252b; color: #555860; border: 1px solid #2b2e36; }");
+	stopAllBtn->setStyleSheet(
+		"QPushButton { background-color: #da3633; color: #ffffff; font-weight: 600; border: 1px solid #f85149; border-radius: 4px; padding: 3px 7px; font-size: 11px; } "
+		"QPushButton:hover { background-color: #f85149; } "
+		"QPushButton:disabled { background-color: #23252b; color: #555860; border: 1px solid #2b2e36; }");
+	configBtn->setStyleSheet(
+		"QPushButton { background-color: #2b2d34; color: #dcddde; border: 1px solid #3c3f49; border-radius: 4px; padding: 3px 7px; font-size: 11px; } "
+		"QPushButton:hover { background-color: #383b44; color: #ffffff; border-color: #4f5461; }");
+
+	connect(startAllBtn, &QPushButton::clicked, this, []() {
+		MultistreamManager::instance().startAll();
+	});
+	connect(stopAllBtn, &QPushButton::clicked, this, []() {
+		MultistreamManager::instance().stopAll();
+	});
+	connect(configBtn, &QPushButton::clicked, this, [this]() {
+		SrtlaMultistreamDialog dlg(this);
+		dlg.exec();
+	});
+
+	headerLayout->addWidget(startAllBtn);
+	headerLayout->addWidget(stopAllBtn);
+	headerLayout->addWidget(configBtn);
+	layout->addWidget(headerWidget);
+
+	// Styled Responsive Targets Table (3 columns: Target, Status & Bitrate, Controls)
+	statusTable = new QTableWidget(this);
+	statusTable->setColumnCount(3);
+	statusTable->setHorizontalHeaderLabels(QStringList() << "Target" << "Status & Bitrate" << "Controls");
 	statusTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
 	statusTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
 	statusTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-	statusTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-	layout->addWidget(statusTable);
+	statusTable->horizontalHeader()->setStretchLastSection(false);
+	statusTable->horizontalHeader()->setMinimumSectionSize(44);
+	statusTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	statusTable->setSelectionMode(QAbstractItemView::NoSelection);
+	statusTable->setFocusPolicy(Qt::NoFocus);
+	statusTable->setAlternatingRowColors(true);
+	statusTable->setShowGrid(false);
+	statusTable->setWordWrap(false);
+	statusTable->verticalHeader()->setVisible(false);
+	statusTable->verticalHeader()->setDefaultSectionSize(32);
+	statusTable->setMinimumHeight(45);
+	statusTable->setStyleSheet(
+		"QTableWidget { "
+		"  background-color: #1b1c20; "
+		"  alternate-background-color: #202226; "
+		"  color: #dcddde; "
+		"  border: 1px solid #2e3138; "
+		"  border-radius: 5px; "
+		"  font-size: 11px; "
+		"  outline: none; "
+		"} "
+		"QTableWidget::item { padding: 2px 6px; border: none; } "
+		"QTableWidget::item:hover { background-color: #282b30; } "
+		"QHeaderView::section { "
+		"  background-color: #23252b; "
+		"  color: #b9bbbe; "
+		"  padding: 4px 6px; "
+		"  font-size: 10px; "
+		"  font-weight: 600; "
+		"  text-transform: uppercase; "
+		"  border: none; "
+		"  border-bottom: 1px solid #32353d; "
+		"  border-right: 1px solid #2b2d33; "
+		"} "
+		"QScrollBar:vertical { background: #18191c; width: 7px; margin: 0px; border-radius: 3px; } "
+		"QScrollBar::handle:vertical { background: #3a3d45; min-height: 20px; border-radius: 3px; } "
+		"QScrollBar::handle:vertical:hover { background: #4e525c; } "
+		"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; } "
+		"QScrollBar:horizontal { background: #18191c; height: 7px; margin: 0px; border-radius: 3px; } "
+		"QScrollBar::handle:horizontal { background: #3a3d45; min-width: 20px; border-radius: 3px; } "
+		"QScrollBar::handle:horizontal:hover { background: #4e525c; } "
+		"QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }");
+	layout->addWidget(statusTable, 1);
 
 	connect(&MultistreamManager::instance(), &MultistreamManager::targetsChanged, this,
 		&SrtlaMultistreamDock::updateList);
 	connect(&MultistreamManager::instance(), &MultistreamManager::targetStatusChanged, this,
 		&SrtlaMultistreamDock::updateList);
 
+	metricsTimer = new QTimer(this);
+	connect(metricsTimer, &QTimer::timeout, this, &SrtlaMultistreamDock::updateMetrics);
+	metricsTimer->start(1000);
+
+	applyResponsiveLayout(width());
 	updateList();
+}
+
+void SrtlaMultistreamDock::resizeEvent(QResizeEvent *event)
+{
+	QWidget::resizeEvent(event);
+	applyResponsiveLayout(event->size().width());
+}
+
+void SrtlaMultistreamDock::applyResponsiveLayout(int w)
+{
+	bool newCompact = (w < 380);
+	bool newUltraCompact = (w < 275);
+
+	if (layout()) {
+		int m = newUltraCompact ? 3 : 6;
+		layout()->setContentsMargins(m, m, m, m);
+		layout()->setSpacing(newUltraCompact ? 4 : 6);
+	}
+
+	if (startAllBtn && stopAllBtn) {
+		startAllBtn->setText(newCompact ? "▶" : "▶ All");
+		stopAllBtn->setText(newCompact ? "⏹" : "⏹ All");
+		startAllBtn->setVisible(!newUltraCompact);
+		stopAllBtn->setVisible(!newUltraCompact);
+	}
+
+	if (statusTable && statusTable->horizontalHeader()) {
+		statusTable->setColumnHidden(1, newUltraCompact);
+		if (newUltraCompact) {
+			statusTable->setHorizontalHeaderLabels(QStringList() << "Target" << "Status" << "Act");
+		} else if (newCompact) {
+			statusTable->setHorizontalHeaderLabels(QStringList() << "Target" << "Status" << "Controls");
+		} else {
+			statusTable->setHorizontalHeaderLabels(QStringList() << "Target" << "Status & Bitrate" << "Controls");
+		}
+
+		for (int r = 0; r < statusTable->rowCount(); ++r) {
+			QWidget *actionWidget = statusTable->cellWidget(r, 2);
+			if (!actionWidget) continue;
+			QPushButton *startBtn = actionWidget->findChild<QPushButton *>("startBtn");
+			QPushButton *stopBtn = actionWidget->findChild<QPushButton *>("stopBtn");
+			if (startBtn) startBtn->setText(newCompact ? "▶" : "▶ Start");
+			if (stopBtn) stopBtn->setText(newCompact ? "⏹" : "⏹ Stop");
+		}
+	}
+
+	bool changed = (newCompact != isCompact) || (newUltraCompact != isUltraCompact);
+	isCompact = newCompact;
+	isUltraCompact = newUltraCompact;
+	if (changed) {
+		updateMetrics();
+	}
 }
 
 void SrtlaMultistreamDock::updateList()
 {
 	statusTable->setRowCount(0);
 	auto targets = MultistreamManager::instance().getTargets();
+	int enabledCount = 0;
+
 	for (int i = 0; i < targets.size(); i++) {
 		auto cfg = targets[i]->getConfig();
 		if (!cfg.enabled)
 			continue;
 
-		statusTable->insertRow(statusTable->rowCount());
-		int row = statusTable->rowCount() - 1;
+		enabledCount++;
+		int row = statusTable->rowCount();
+		statusTable->insertRow(row);
+		statusTable->setRowHeight(row, 32);
 
 		QTableWidgetItem *nameItem = new QTableWidgetItem(cfg.name);
+		nameItem->setData(Qt::UserRole, cfg.id);
+		nameItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 		statusTable->setItem(row, 0, nameItem);
 
-		QString statusStr = "Stopped";
-		auto status = targets[i]->getStatus();
-		if (status == MultistreamTarget::STARTING)
-			statusStr = "Starting...";
-		else if (status == MultistreamTarget::STREAMING)
-			statusStr = "Streaming";
-		else if (status == MultistreamTarget::STOPPING)
-			statusStr = "Stopping...";
-		else if (status == MultistreamTarget::RECONNECTING)
-			statusStr = "Reconnecting...";
-
-		QTableWidgetItem *statusItem = new QTableWidgetItem(statusStr);
+		QTableWidgetItem *statusItem = new QTableWidgetItem();
+		statusItem->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 		statusTable->setItem(row, 1, statusItem);
 
-		QPushButton *startBtn = new QPushButton("Start");
+		QWidget *actionWidget = new QWidget();
+		actionWidget->setStyleSheet("background: transparent;");
+		QHBoxLayout *actionLayout = new QHBoxLayout(actionWidget);
+		actionLayout->setContentsMargins(isUltraCompact ? 2 : 4, 2, isUltraCompact ? 2 : 4, 2);
+		actionLayout->setSpacing(isUltraCompact ? 2 : 4);
+
+		QPushButton *startBtn = new QPushButton(isCompact ? "▶" : "▶ Start");
+		QPushButton *stopBtn = new QPushButton(isCompact ? "⏹" : "⏹ Stop");
+		startBtn->setObjectName("startBtn");
+		stopBtn->setObjectName("stopBtn");
 		startBtn->setProperty("targetId", cfg.id);
-		connect(startBtn, &QPushButton::clicked, this, &SrtlaMultistreamDock::startTarget);
-		statusTable->setCellWidget(row, 2, startBtn);
-
-		QPushButton *stopBtn = new QPushButton("Stop");
 		stopBtn->setProperty("targetId", cfg.id);
-		connect(stopBtn, &QPushButton::clicked, this, &SrtlaMultistreamDock::stopTarget);
-		statusTable->setCellWidget(row, 3, stopBtn);
+		startBtn->setCursor(Qt::PointingHandCursor);
+		stopBtn->setCursor(Qt::PointingHandCursor);
+		startBtn->setToolTip(QString("Start streaming to %1").arg(cfg.name));
+		stopBtn->setToolTip(QString("Stop streaming to %1").arg(cfg.name));
 
-		startBtn->setEnabled(status == MultistreamTarget::STOPPED);
-		stopBtn->setEnabled(status != MultistreamTarget::STOPPED);
+		startBtn->setStyleSheet(
+			"QPushButton { background-color: #238636; color: #ffffff; font-weight: 600; border: 1px solid #2ea043; border-radius: 4px; padding: 2px 8px; font-size: 11px; min-width: 18px; } "
+			"QPushButton:hover { background-color: #2ea043; } "
+			"QPushButton:disabled { background-color: #23252b; color: #555860; border: 1px solid #2b2e36; }");
+		stopBtn->setStyleSheet(
+			"QPushButton { background-color: #da3633; color: #ffffff; font-weight: 600; border: 1px solid #f85149; border-radius: 4px; padding: 2px 8px; font-size: 11px; min-width: 18px; } "
+			"QPushButton:hover { background-color: #f85149; } "
+			"QPushButton:disabled { background-color: #23252b; color: #555860; border: 1px solid #2b2e36; }");
+
+		connect(startBtn, &QPushButton::clicked, this, &SrtlaMultistreamDock::startTarget);
+		connect(stopBtn, &QPushButton::clicked, this, &SrtlaMultistreamDock::stopTarget);
+
+		actionLayout->addWidget(startBtn);
+		actionLayout->addWidget(stopBtn);
+		statusTable->setCellWidget(row, 2, actionWidget);
+	}
+
+	if (enabledCount == 0) {
+		statusTable->insertRow(0);
+		statusTable->setRowHeight(0, 36);
+		QTableWidgetItem *emptyItem = new QTableWidgetItem("No enabled targets — click ⚙ to configure");
+		emptyItem->setForeground(QBrush(QColor("#888888")));
+		emptyItem->setTextAlignment(Qt::AlignCenter);
+		statusTable->setItem(0, 0, emptyItem);
+		statusTable->setSpan(0, 0, 1, 3);
+	}
+
+	updateMetrics();
+}
+
+void SrtlaMultistreamDock::updateMetrics()
+{
+	auto targets = MultistreamManager::instance().getTargets();
+	int enabledCount = 0;
+	int activeCount = 0;
+	double totalKbps = 0.0;
+
+	for (int r = 0; r < statusTable->rowCount(); ++r) {
+		QTableWidgetItem *nameItem = statusTable->item(r, 0);
+		if (!nameItem) continue;
+		QString id = nameItem->data(Qt::UserRole).toString();
+		if (id.isEmpty()) continue; // Empty placeholder row
+
+		MultistreamTarget *t = MultistreamManager::instance().getTarget(id);
+		if (!t) continue;
+
+		enabledCount++;
+		auto cfg = t->getConfig();
+		auto status = t->getStatus();
+		QJsonObject m = t->getMetrics();
+
+		uint64_t bytes = m["bytes"].toVariant().toULongLong();
+		int dropped = m["frames_dropped"].toInt();
+		int totalFrames = m["total_frames"].toInt();
+
+		uint64_t prevBytes = prevBytesMap.value(id, bytes);
+		if (bytes < prevBytes) prevBytes = bytes;
+		prevBytesMap[id] = bytes;
+
+		double kbps = (status == MultistreamTarget::STREAMING)
+			? (((bytes - prevBytes) * 8.0) / 1000.0)
+			: 0.0;
+		totalKbps += kbps;
+
+		QString statusText;
+		QString dot = "○";
+		QColor color("#888888");
+
+		if (status == MultistreamTarget::STREAMING) {
+			activeCount++;
+			dot = "●";
+			color = (dropped > 0) ? QColor("#f0b232") : QColor("#3fb950");
+			statusText = isCompact
+				? QString("● %1k").arg(QString::number(kbps, 'f', 0))
+				: QString("● Live • %1 Kbps").arg(QString::number(kbps, 'f', 0));
+		} else if (status == MultistreamTarget::STARTING) {
+			dot = "◐";
+			color = QColor("#58a6ff");
+			statusText = isCompact ? "◐ Start..." : "◐ Starting...";
+		} else if (status == MultistreamTarget::RECONNECTING) {
+			dot = "⟳";
+			color = QColor("#f0b232");
+			statusText = isCompact ? "⟳ Retry..." : "⟳ Reconnecting...";
+		} else if (status == MultistreamTarget::STOPPING) {
+			dot = "◑";
+			color = QColor("#888888");
+			statusText = isCompact ? "◑ Stop..." : "◑ Stopping...";
+		} else {
+			dot = "○";
+			color = QColor("#888888");
+			statusText = "○ Stopped";
+		}
+
+		QString tooltip = QString("Target: %1\nURL: %2\nStatus: %3\nBitrate: %4 Kbps\nDropped Frames: %5 / %6")
+			.arg(cfg.name, cfg.url, statusText)
+			.arg(QString::number(kbps, 'f', 1))
+			.arg(dropped)
+			.arg(totalFrames);
+
+		if (isUltraCompact) {
+			QString compactName = cfg.name;
+			if (status == MultistreamTarget::STREAMING && kbps > 0) {
+				compactName += QString(" (%1k)").arg(QString::number(kbps, 'f', 0));
+			}
+			nameItem->setText(QString("%1 %2").arg(dot, compactName));
+			nameItem->setForeground(QBrush(status == MultistreamTarget::STOPPED ? QColor("#9ca3af") : color));
+		} else {
+			nameItem->setText(cfg.name);
+			nameItem->setForeground(QBrush(QColor("#dcddde")));
+		}
+		nameItem->setToolTip(tooltip);
+
+		QTableWidgetItem *statusItem = statusTable->item(r, 1);
+		if (statusItem) {
+			statusItem->setText(statusText);
+			statusItem->setForeground(QBrush(color));
+			statusItem->setToolTip(tooltip);
+		}
+
+		QWidget *actionWidget = statusTable->cellWidget(r, 2);
+		if (actionWidget) {
+			QPushButton *startBtn = actionWidget->findChild<QPushButton *>("startBtn");
+			QPushButton *stopBtn = actionWidget->findChild<QPushButton *>("stopBtn");
+			bool isStopped = (status == MultistreamTarget::STOPPED);
+			if (startBtn && stopBtn) {
+				if (isCompact) {
+					// Show single contextual button when narrow
+					startBtn->setVisible(isStopped);
+					stopBtn->setVisible(!isStopped);
+				} else {
+					startBtn->setVisible(true);
+					stopBtn->setVisible(true);
+				}
+				startBtn->setEnabled(isStopped);
+				stopBtn->setEnabled(!isStopped);
+			}
+		}
+	}
+
+	if (startAllBtn && stopAllBtn) {
+		startAllBtn->setEnabled(enabledCount > 0 && activeCount < enabledCount);
+		stopAllBtn->setEnabled(activeCount > 0);
+	}
+
+	if (summaryLabel) {
+		QString accent = (activeCount > 0) ? "#3fb950" : "#555860";
+		summaryLabel->setStyleSheet(QString(
+			"QLabel { "
+			"  background-color: #18191c; "
+			"  border: 1px solid #2e3138; "
+			"  border-left: 3px solid %1; "
+			"  border-radius: 5px; "
+			"  padding: %2; "
+			"  font-size: 11px; "
+			"  color: #dcddde; "
+			"}")
+			.arg(accent)
+			.arg(isUltraCompact ? "3px 6px" : "4px 8px"));
+
+		QString summaryHtml;
+		if (activeCount > 0) {
+			if (isUltraCompact) {
+				summaryHtml = QString("<span style='color:#3fb950; font-weight:bold;'>● %1/%2</span> &bull; <span style='color:#3fb950; font-weight:bold;'>%3k</span>")
+					.arg(activeCount).arg(enabledCount).arg(QString::number(totalKbps, 'f', 0));
+			} else if (isCompact) {
+				summaryHtml = QString("<span style='color:#3fb950; font-weight:bold;'>● Live</span> &bull; <b>%1/%2</b> &bull; <span style='color:#3fb950; font-weight:bold;'>%3 Kbps</span>")
+					.arg(activeCount).arg(enabledCount).arg(QString::number(totalKbps, 'f', 0));
+			} else {
+				summaryHtml = QString("<span style='color:#3fb950; font-weight:bold;'>● Streaming</span> &nbsp;&bull;&nbsp; <b>Active:</b> %1/%2 &nbsp;&bull;&nbsp; <b>Out:</b> <span style='color:#3fb950; font-weight:bold;'>%3 Kbps</span>")
+					.arg(activeCount).arg(enabledCount).arg(QString::number(totalKbps, 'f', 0));
+			}
+		} else {
+			if (isUltraCompact) {
+				summaryHtml = QString("<span style='color:#888888; font-weight:bold;'>○ Idle</span> &bull; <b>0/%1</b>").arg(enabledCount);
+			} else {
+				summaryHtml = QString("<span style='color:#888888; font-weight:bold;'>○ Idle</span> &nbsp;&bull;&nbsp; <b>Active:</b> 0/%1").arg(enabledCount);
+			}
+		}
+		summaryLabel->setText(summaryHtml);
 	}
 }
 

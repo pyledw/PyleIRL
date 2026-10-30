@@ -17,6 +17,16 @@ public:
 	SrtlaStatusWidget(QWidget *parent = nullptr);
 	~SrtlaStatusWidget();
 
+protected:
+	void resizeEvent(QResizeEvent *event) override;
+	void applyResponsiveLayout(int width);
+	bool isCompact = false;
+	bool isUltraCompact = false;
+	bool lastIsListening = false;
+	int lastGroups = 0;
+	int lastConnections = 0;
+	double lastTotalBitrateKbps = 0.0;
+
 private slots:
 	void updateStatus();
 	void onSplitterMoved(int pos, int index);
@@ -239,4 +249,17 @@ private slots:
 
 private:
 	class QTableWidget *statusTable;
+	QLabel *summaryLabel = nullptr;
+	QTimer *metricsTimer = nullptr;
+	QMap<QString, uint64_t> prevBytesMap;
+	bool isCompact = false;
+	bool isUltraCompact = false;
+	class QPushButton *startAllBtn = nullptr;
+	class QPushButton *stopAllBtn = nullptr;
+	class QPushButton *configBtn = nullptr;
+
+protected:
+	void resizeEvent(QResizeEvent *event) override;
+	void applyResponsiveLayout(int width);
+	void updateMetrics();
 };
