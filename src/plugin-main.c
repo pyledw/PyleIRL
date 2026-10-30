@@ -67,8 +67,6 @@ static void frontend_event_cb(enum obs_frontend_event event, void *private_data)
 	(void)private_data;
 	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
 		setup_srtla_menu();
-		obs_frontend_add_dock_by_id("srtla_status_dock", "Bonding Status", create_srtla_dock());
-		obs_frontend_add_dock_by_id("srtla_multistream_dock", "Multistream Status", create_srtla_multistream_dock());
 	} else if (event == OBS_FRONTEND_EVENT_SCRIPTING_SHUTDOWN || event == OBS_FRONTEND_EVENT_EXIT) {
 		pyleirl_shutdown();
 		srtla_force_stop_all();
@@ -98,6 +96,8 @@ bool obs_module_load(void)
 	register_source_compat(&srtla_source_info);
 	register_source_compat(&rist_source_info);
 	register_source_compat(&srtla_stats_filter_info);
+	obs_frontend_add_dock_by_id("srtla_status_dock", "Bonding Status", create_srtla_dock());
+	obs_frontend_add_dock_by_id("srtla_multistream_dock", "Multistream Status", create_srtla_multistream_dock());
 	obs_frontend_add_event_callback(frontend_event_cb, NULL);
 	return true;
 }
