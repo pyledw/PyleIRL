@@ -283,13 +283,19 @@ static int rist_stats_cb(void *arg, const struct rist_stats *stats_container) {
                     }
                 }
                 
-                // Cleanup stale peers (not seen in 2 seconds)
+                // Cleanup stale peers (not seen in 2 seconds) and update active peer count
+                int active_peers = 0;
                 for (int i = 0; i < 32; i++) {
-                    if (info->peers[i].last_seen_ms > 0 && (now_ms - info->peers[i].last_seen_ms > 2000)) {
-                        info->peers[i].last_seen_ms = 0;
-                        info->peers[i].cumulative_bytes = 0;
+                    if (info->peers[i].last_seen_ms > 0) {
+                        if (now_ms - info->peers[i].last_seen_ms > 2000) {
+                            info->peers[i].last_seen_ms = 0;
+                            info->peers[i].cumulative_bytes = 0;
+                        } else {
+                            active_peers++;
+                        }
                     }
                 }
+                info->peer_count = active_peers;
                 
                 json_decref(root);
             }
@@ -392,6 +398,13 @@ int rist_rec_main(const struct rist_config *config) {
         int queue_size = rist_receiver_data_read2(relay.ctx, &data_block, 50); // 50ms timeout
 
         if (queue_size > 0 && data_block && data_block->payload) {
+            if (ctx_index >= 0) {
+                pthread_mutex_lock(&global_rist_mutex);
+                if (global_rist_contexts[ctx_index]) {
+                    global_rist_contexts[ctx_index]->total_bytes += data_block->payload_len;
+                }
+                pthread_mutex_unlock(&global_rist_mutex);
+            }
             // Send payload to local UDP socket
             sendto(relay.udp_socket, (const char *)data_block->payload, (int)data_block->payload_len, 0,
                    (struct sockaddr *)&relay.dest_addr, sizeof(relay.dest_addr));
@@ -432,16 +445,35 @@ void rist_get_connection_stats(bool *is_listening, int *active_groups, int *acti
 
 int rist_get_peer_count_by_port(int listen_port) {
     int count = 0;
+    uint64_t now_ms = os_gettime_ns() / 1000000;
     pthread_mutex_lock(&global_rist_mutex);
     for (int i = 0; i < MAX_RIST_INSTANCES; i++) {
         rist_ctx_info_t *info = global_rist_contexts[i];
         if (info && info->listen_port == listen_port && info->is_listening) {
-            count = info->peer_count;
+            for (int p = 0; p < 32; p++) {
+                if (info->peers[p].last_seen_ms > 0 && (now_ms - info->peers[p].last_seen_ms <= 2000)) {
+                    count++;
+                }
+            }
             break;
         }
     }
     pthread_mutex_unlock(&global_rist_mutex);
     return count;
+}
+
+uint64_t rist_get_total_bytes(int listen_port) {
+    uint64_t total = 0;
+    pthread_mutex_lock(&global_rist_mutex);
+    for (int i = 0; i < MAX_RIST_INSTANCES; i++) {
+        rist_ctx_info_t *info = global_rist_contexts[i];
+        if (info && info->listen_port == listen_port && info->is_listening) {
+            total = info->total_bytes;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&global_rist_mutex);
+    return total;
 }
 
 void rist_get_connection_details(char* out_buffer, int max_len) {

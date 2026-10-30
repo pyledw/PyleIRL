@@ -18,6 +18,7 @@
 extern int srtla_rec_main(const char *listen_ip, int listen_port, const char *srt_host, int srt_port,
 			  volatile int *stop_flag);
 extern int srtla_get_group_count_by_port(int listen_port);
+extern uint64_t srtla_get_total_bytes(int listen_port);
 extern void srtla_reset_group_by_port(int listen_port);
 extern uint64_t srtla_get_group_seq_by_port(int listen_port);
 
@@ -202,6 +203,9 @@ struct srtla_source {
 	uint64_t last_audio_time;
 	uint64_t last_video_time;
 	uint64_t last_media_time;
+	uint64_t last_video_ts;
+	uint64_t last_network_bytes;
+	uint64_t last_network_time;
 	uint64_t connected_since;
 	uint64_t starved_since;
 	uint64_t drift_since;
@@ -273,8 +277,13 @@ bool srtla_is_media_playing(int listen_port) {
 			curr = curr->next;
 			continue;
 		}
-		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 500000000ULL));
-		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 500000000ULL));
+		if (!curr->thread_running || curr->stop_flag) {
+			curr = curr->next;
+			continue;
+		}
+		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 750000000ULL));
+		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 750000000ULL));
+		bool network_active = (curr->last_network_time > 0 && (now - curr->last_network_time < 1500000000ULL));
 
 		if (curr->media_source && obs_source_get_base_width(curr->media_source) == 0) {
 			video_playing = false;
@@ -284,7 +293,10 @@ bool srtla_is_media_playing(int listen_port) {
 			video_playing = false;
 		}
 
-		if (curr->last_audio_time > 0 && curr->last_video_time > 0) {
+		if (!network_active) {
+			// Network bytes have stopped flowing for >1.5s -> connection stopped
+			playing = false;
+		} else if (curr->last_audio_time > 0 && curr->last_video_time > 0) {
 			// If stream has both audio and video, require video to be playing
 			// This fixes the issue where a frozen video frame wouldn't trigger failover if audio kept going
 			if (audio_playing && video_playing) {
@@ -292,8 +304,8 @@ bool srtla_is_media_playing(int listen_port) {
 				break;
 			}
 		} else if (curr->last_audio_time > 0) {
-			if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 2000000000ULL)) {
-				// Connected for >2s but still no video frames locked -> not playing
+			if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 3000000000ULL)) {
+				// Connected for >3s but still no video frames locked -> not playing
 				playing = false;
 			} else if (audio_playing) {
 				playing = true;
@@ -799,6 +811,29 @@ static void srtla_source_update(void *data, obs_data_t *settings)
 #endif
 }
 
+static void srtla_check_video_frame_progress(struct srtla_source *context, uint64_t now)
+{
+	if (!context || !context->media_source)
+		return;
+
+	struct obs_source_frame *frame = obs_source_get_frame(context->media_source);
+	if (frame) {
+		if (frame->width > 0 && frame->height > 0 && frame->timestamp != context->last_video_ts) {
+			context->last_video_time = now;
+			context->last_video_ts = frame->timestamp;
+		}
+		obs_source_release_frame(context->media_source, frame);
+	}
+
+	if (obs_source_get_base_width(context->media_source) > 0) {
+		uint64_t current_media_time = obs_source_media_get_time(context->media_source);
+		if (current_media_time != context->last_media_time) {
+			context->last_video_time = now;
+			context->last_media_time = current_media_time;
+		}
+	}
+}
+
 static void srtla_source_video_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
@@ -806,13 +841,7 @@ static void srtla_source_video_render(void *data, gs_effect_t *effect)
 	
 	if (context->media_source) {
 		obs_source_video_render(context->media_source);
-		if (obs_source_get_base_width(context->media_source) > 0) {
-			uint64_t current_media_time = obs_source_media_get_time(context->media_source);
-			if (current_media_time != context->last_media_time) {
-				context->last_video_time = os_gettime_ns();
-				context->last_media_time = current_media_time;
-			}
-		}
+		srtla_check_video_frame_progress(context, os_gettime_ns());
 	}
 }
 
@@ -891,13 +920,17 @@ static void srtla_source_video_tick(void *data, float seconds)
 			srtla_reload_media_source(context);
 		}
 
-		if (context->media_source && obs_source_get_base_width(context->media_source) > 0) {
-			uint64_t current_media_time = obs_source_media_get_time(context->media_source);
-			if (current_media_time != context->last_media_time) {
-				context->last_video_time = now;
-				context->last_media_time = current_media_time;
+		if (context->listen_port > 0 && context->thread_running && !context->stop_flag) {
+			uint64_t current_bytes = srtla_get_total_bytes(context->listen_port);
+			if (current_bytes != context->last_network_bytes) {
+				if (current_bytes > context->last_network_bytes) {
+					context->last_network_time = now;
+				}
+				context->last_network_bytes = current_bytes;
 			}
 		}
+
+		srtla_check_video_frame_progress(context, now);
 
 		if (now - context->last_audio_time > 100000000ULL) {
 			// No audio for 100ms -> reset meter so web overlay doesn't get stuck
@@ -946,6 +979,11 @@ void srtla_force_stop(void *data)
 			context->was_connected = false;
 			context->connected_since = 0;
 			context->last_audio_time = 0;
+			context->last_video_time = 0;
+			context->last_video_ts = 0;
+			context->last_media_time = 0;
+			context->last_network_bytes = 0;
+			context->last_network_time = 0;
 			context->starved_since = 0;
 			context->drift_since = 0;
 			context->initial_delay_set = false;

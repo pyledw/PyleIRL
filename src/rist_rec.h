@@ -28,6 +28,7 @@ int rist_rec_main(const struct rist_config *config);
 void rist_get_connection_stats(bool *is_listening, int *active_groups, int *active_connections);
 void rist_get_connection_details(char* out_buffer, int max_len);
 int rist_get_peer_count_by_port(int listen_port);
+uint64_t rist_get_total_bytes(int listen_port);
 
 #ifdef __cplusplus
 }

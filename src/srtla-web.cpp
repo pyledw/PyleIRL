@@ -518,7 +518,9 @@ static void handle_api_autoswitch_get(const httplib::Request &req, httplib::Resp
 	QJsonObject obj;
 	if (global_config) {
 		const char *rules = config_get_string(global_config, "SRTLA_AutoSwitch", "RulesJSON");
+		const char *failoverScene = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
 		const char *noFailover = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
+		obj["failover_scene"] = failoverScene ? QString(failoverScene) : "";
 		const char *visRules = config_get_string(global_config, "SRTLA_AutoSwitch", "VisibilityRulesJSON");
 		const char *volRules = config_get_string(global_config, "SRTLA_AutoSwitch", "VolumeRulesJSON");
 		obj["rules"] = rules ? QString(rules) : "[]";
@@ -555,9 +557,24 @@ static void handle_api_autoswitch_post(const httplib::Request &req, httplib::Res
 	QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(req.body));
 	if (doc.isObject()) {
 		QJsonObject obj = doc.object();
-		if (obj.contains("rules"))
+		if (obj.contains("failover_scene"))
+			config_set_string(global_config, "SRTLA_AutoSwitch", "FailoverScene",
+					  obj["failover_scene"].toString().toUtf8().constData());
+		if (obj.contains("rules")) {
+			QString rulesStr = obj["rules"].toString();
 			config_set_string(global_config, "SRTLA_AutoSwitch", "RulesJSON",
-					  obj["rules"].toString().toUtf8().constData());
+					  rulesStr.toUtf8().constData());
+			if (!obj.contains("failover_scene")) {
+				QJsonDocument rDoc = QJsonDocument::fromJson(rulesStr.toUtf8());
+				if (rDoc.isArray() && !rDoc.array().isEmpty()) {
+					QString sName = rDoc.array()[0].toObject()["sceneName"].toString();
+					if (!sName.isEmpty()) {
+						config_set_string(global_config, "SRTLA_AutoSwitch", "FailoverScene",
+								  sName.toUtf8().constData());
+					}
+				}
+			}
+		}
 		if (obj.contains("no_failover_scenes"))
 			config_set_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes",
 					  obj["no_failover_scenes"].toString().toUtf8().constData());

@@ -1673,6 +1673,21 @@ void SrtlaAutoSwitcher::loadRules()
 		const char *failoverStr = config_get_string(global_config, "SRTLA_AutoSwitch", "FailoverScene");
 		if (failoverStr) failoverScene = QString::fromUtf8(failoverStr);
 
+		if (failoverScene.isEmpty()) {
+			const char *legacyRulesJson = config_get_string(global_config, "SRTLA_AutoSwitch", "RulesJSON");
+			if (legacyRulesJson && *legacyRulesJson) {
+				QJsonDocument rDoc = QJsonDocument::fromJson(QByteArray(legacyRulesJson));
+				if (rDoc.isArray() && !rDoc.array().isEmpty()) {
+					QJsonObject firstRule = rDoc.array()[0].toObject();
+					QString sceneFromRule = firstRule["sceneName"].toString();
+					if (sceneFromRule.isEmpty()) sceneFromRule = firstRule["failoverScene"].toString();
+					if (!sceneFromRule.isEmpty()) {
+						failoverScene = sceneFromRule;
+					}
+				}
+			}
+		}
+
 		const char *noFailoverJson = config_get_string(global_config, "SRTLA_AutoSwitch", "NoFailoverScenes");
 		if (noFailoverJson && *noFailoverJson) {
 			QJsonDocument doc = QJsonDocument::fromJson(QByteArray(noFailoverJson));
@@ -1864,7 +1879,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "ReturnDelay") || returnDelay <= 0) {
 		returnDelay = 5;
 	}
-	if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "Delay") || delay <= 0) {
+	if (!config_has_user_value(global_config, "SRTLA_AutoSwitch", "Delay") || delay < 0) {
 		delay = 4;
 	}
 	int visDelay = config_get_int(global_config, "SRTLA_AutoSwitch", "VisDelay");
@@ -1951,7 +1966,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 	
 	is_listening = is_listening || rist_listening;
 
-	if (!is_listening) {
+	if (!is_listening && activePrimaryPort <= 0) {
 		isCurrentlyFailover = false;
 		matchDurationCounter = 0;
 		currentMatchedVisRules.clear();
@@ -1977,50 +1992,82 @@ void SrtlaAutoSwitcher::checkBitrate()
 
 	for (int i = 0; i < allGroupsArray.size(); i++) {
 		QJsonObject gObj = allGroupsArray[i].toObject();
-			int gPort = gObj["listen_port"].toInt();
-			QString groupIdStr = QString::number(gObj["id"].toVariant().toULongLong());
+		int gPort = gObj["listen_port"].toInt();
+		QString groupIdStr = QString::number(gObj["id"].toVariant().toULongLong());
 
-			QJsonArray connsArray = gObj["conns"].toArray();
-			double calculatedSumKbps = 0.0;
-			for (int j = 0; j < connsArray.size(); j++) {
-				QJsonObject cObj = connsArray[j].toObject();
-				QString ip = cObj["ip"].toString();
-				QString port = QString::number(cObj["port"].toInt());
-				QString connIdStr = groupIdStr + "_" + ip + ":" + port;
+		QJsonArray connsArray = gObj["conns"].toArray();
+		double calculatedSumKbps = 0.0;
+		for (int j = 0; j < connsArray.size(); j++) {
+			QJsonObject cObj = connsArray[j].toObject();
+			QString ip = cObj["ip"].toString();
+			QString port = QString::number(cObj["port"].toInt());
+			QString connIdStr = groupIdStr + "_" + ip + ":" + port;
 
-				uint64_t cBytes = cObj["bytes"].toVariant().toULongLong();
-				uint64_t cPrevBytes = previousBytes.value(connIdStr, cBytes);
-				if (cBytes < cPrevBytes) {
-					cPrevBytes = cBytes;
-				}
-				previousBytes[connIdStr] = cBytes;
-
-				// We check every 1 second here
-				double cKbps = ((cBytes - cPrevBytes) * 8.0) / 1000.0 / 1.0;
-				calculatedSumKbps += cKbps;
+			uint64_t cBytes = cObj["bytes"].toVariant().toULongLong();
+			uint64_t cPrevBytes = previousBytes.value(connIdStr, cBytes);
+			if (cBytes < cPrevBytes) {
+				cPrevBytes = cBytes;
 			}
+			previousBytes[connIdStr] = cBytes;
 
-			portTotalKbps[gPort] += calculatedSumKbps;
-			activeGroupsWithData++;
+			// We check every 1 second here
+			double cKbps = ((cBytes - cPrevBytes) * 8.0) / 1000.0 / 1.0;
+			calculatedSumKbps += cKbps;
 		}
+
+		portTotalKbps[gPort] += calculatedSumKbps;
+		activeGroupsWithData++;
+	}
 
 	// Clean up previousBytes for disconnected groups
 	if (activeGroupsWithData == 0) {
 		previousBytes.clear();
 	}
 
-	// Dynamically track primary source based on media playing state
+	// Dynamically track primary source based on media playing state or active network stream
 	bool currentPrimaryActive = false;
-	if (activePrimaryPort > 0 && (srtla_is_media_playing(activePrimaryPort) || rist_is_media_playing(activePrimaryPort))) {
+	if (activePrimaryPort > 0 &&
+	    (srtla_is_media_playing(activePrimaryPort) || rist_is_media_playing(activePrimaryPort) ||
+	     portTotalKbps.value(activePrimaryPort, 0.0) > 10.0)) {
 		currentPrimaryActive = true;
 	}
 
 	if (!currentPrimaryActive) {
 		int newPrimaryPort = 0;
 		for (auto it = portTotalKbps.begin(); it != portTotalKbps.end(); ++it) {
-			if (srtla_is_media_playing(it.key()) || rist_is_media_playing(it.key())) {
+			if (srtla_is_media_playing(it.key()) || rist_is_media_playing(it.key()) || it.value() > 10.0) {
 				newPrimaryPort = it.key();
 				break;
+			}
+		}
+
+		// Also check all configured receivers in case a receiver is playing before its first group stats tick
+		if (newPrimaryPort == 0) {
+			char rec_buf[4096] = {0};
+			srtla_get_all_receivers_json(rec_buf, sizeof(rec_buf));
+			QJsonDocument rDoc = QJsonDocument::fromJson(QByteArray(rec_buf));
+			if (rDoc.isArray()) {
+				for (const auto &val : rDoc.array()) {
+					int p = val.toObject()["listen_port"].toInt();
+					if (p > 0 && srtla_is_media_playing(p)) {
+						newPrimaryPort = p;
+						break;
+					}
+				}
+			}
+		}
+		if (newPrimaryPort == 0) {
+			char rec_buf[4096] = {0};
+			rist_get_all_receivers_json(rec_buf, sizeof(rec_buf));
+			QJsonDocument rDoc = QJsonDocument::fromJson(QByteArray(rec_buf));
+			if (rDoc.isArray()) {
+				for (const auto &val : rDoc.array()) {
+					int p = val.toObject()["listen_port"].toInt();
+					if (p > 0 && rist_is_media_playing(p)) {
+						newPrimaryPort = p;
+						break;
+					}
+				}
 			}
 		}
 		
@@ -2047,6 +2094,8 @@ void SrtlaAutoSwitcher::checkBitrate()
 				return c->name.isEmpty();
 			}, &ctx);
 			activePrimarySource = ctx.name;
+			obs_log(LOG_INFO, "[PyleIRL AutoSwitch] Locked onto primary receiver '%s' on port %d",
+				activePrimarySource.toUtf8().constData(), activePrimaryPort);
 		}
 	}
 
@@ -2069,9 +2118,17 @@ void SrtlaAutoSwitcher::checkBitrate()
 			originalSceneName = "";
 		} else {
 			bool mediaIsPlaying = srtla_is_media_playing(activePrimaryPort) || rist_is_media_playing(activePrimaryPort);
+			double primaryKbps = portTotalKbps.value(activePrimaryPort, 0.0);
+			if (primaryKbps < 1.0) {
+				networkDeadDurationMs[activePrimaryPort] += 1000;
+			} else {
+				networkDeadDurationMs[activePrimaryPort] = 0;
+			}
+			bool networkStopped = (networkDeadDurationMs[activePrimaryPort] >= 2000) || !is_listening;
+			bool streamHealthy = mediaIsPlaying && !networkStopped;
 
-			if (!mediaIsPlaying) {
-				// Media buffer is starved, frozen, or heavily corrupt
+			if (!streamHealthy) {
+				// Connection stopped or media buffer is starved, frozen, or heavily corrupt
 				recoveryDurationCounter = 0; // Reset recovery timer immediately!
 				if (!isCurrentlyFailover) {
 					matchDurationCounter++;
@@ -2084,6 +2141,10 @@ void SrtlaAutoSwitcher::checkBitrate()
 							}
 							obs_source_t *targetSceneSrc = obs_get_source_by_name(failoverScene.toUtf8().constData());
 							if (targetSceneSrc) {
+								obs_log(LOG_INFO, "[PyleIRL AutoSwitch] Connection stopped on port %d for %ds — switching from '%s' to failover scene '%s'",
+									activePrimaryPort, matchDurationCounter,
+									currentSceneName.toUtf8().constData(),
+									failoverScene.toUtf8().constData());
 								obs_frontend_set_current_scene(targetSceneSrc);
 								obs_source_release(targetSceneSrc);
 							}
@@ -2092,7 +2153,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 					}
 				}
 			} else {
-				// Media buffer is delivering healthy frames
+				// Media buffer is delivering healthy frames and network is active
 				matchDurationCounter = 0; // Reset failover counter
 				if (isCurrentlyFailover) {
 					// Require continuous good stream for returnDelay (default 5s) before returning to Live!
@@ -2103,6 +2164,9 @@ void SrtlaAutoSwitcher::checkBitrate()
 							originalSceneName = "";
 							obs_source_t *targetSceneSrc = obs_get_source_by_name(targetToRestore.toUtf8().constData());
 							if (targetSceneSrc) {
+								obs_log(LOG_INFO, "[PyleIRL AutoSwitch] Stream recovered on port %d for %ds — restoring scene '%s'",
+									activePrimaryPort, recoveryDurationCounter,
+									targetToRestore.toUtf8().constData());
 								obs_frontend_set_current_scene(targetSceneSrc);
 								obs_source_release(targetSceneSrc);
 							}
