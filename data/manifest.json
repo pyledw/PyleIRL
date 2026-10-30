@@ -1,0 +1,13 @@
+{
+  "$schema": "https://obsproject.com/schemas/plugin-manifest.json",
+  "id": "com.disneystreams.pyleirl",
+  "name": "PyleIRL",
+  "display_name": "PyleIRL",
+  "version": "4.4.0",
+  "author": "David W Pyle",
+  "description": "Native SRTLA and RIST receiver, multistreaming, automation, and web dashboard plugin for OBS Studio.",
+  "urls": {
+    "website": "https://disneystreams.com",
+    "repository": "https://github.com/pyledw/PyleIRL"
+  }
+}

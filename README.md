@@ -15,14 +15,14 @@ A custom, high-performance **SRTLA (SRT Link Aggregation)** Receiver plugin buil
 
 Select your operating system below to download and install the pre-compiled version of the plugin:
 
-### 💻 Windows
+### 💻 Windows (OBS Studio 33.0+)
 1. **Download the Zip Package**:
-   * Download the **[PyleIRL_Windows.zip](/Install/PyleIRL_Windows.zip)** archive directly from the `/Install` directory of this repository.
+   * Download the **[PyleIRL_Windows.zip](/Install/PyleIRL_Windows.zip)** archive from the Releases page or `/Install` directory.
 2. **Install**:
    * Close OBS Studio.
-   * Extract the contents of the zip file directly into your OBS Studio installation folder:
-     * Default path: `C:\Program Files\obs-studio\`
-     * (This automatically copies `PyleIRL.dll` into `C:\Program Files\obs-studio\obs-plugins\64bit\`).
+   * Extract the `PyleIRL` folder into the unified OBS Studio 33+ third-party plugins directory:
+     * Default path: `C:\ProgramData\obs-studio\plugins\`
+     * (This places `PyleIRL.dll` and `data\` directly inside `C:\ProgramData\obs-studio\plugins\PyleIRL\`).
    * Restart OBS.
    
    *Note:* If you receive a SmartScreen warning or an error when loading, right-click the `PyleIRL.dll` file, select **Properties**, and check **Unblock** if it was blocked by Windows as a downloaded file.

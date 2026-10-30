@@ -47,3 +47,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin-support.c.in")
     set_property(TARGET plugin-support PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/manifest.json.in")
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/manifest.json.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/manifest.json"
+    @ONLY
+  )
+endif()

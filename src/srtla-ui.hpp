@@ -10,7 +10,7 @@
 
 #include <obs-frontend-api.h>
 
-class SrtlaStatusWidget : public QDockWidget {
+class SrtlaStatusWidget : public QWidget {
 	Q_OBJECT
 
 public:
@@ -226,7 +226,7 @@ private:
 	class QTableWidget *targetsTable;
 };
 
-class SrtlaMultistreamDock : public QDockWidget {
+class SrtlaMultistreamDock : public QWidget {
 	Q_OBJECT
 
 public:

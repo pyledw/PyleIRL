@@ -26,6 +26,17 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
+OBS_MODULE_AUTHOR("David W Pyle")
+
+MODULE_EXPORT const char *obs_module_name(void)
+{
+	return "PyleIRL";
+}
+
+MODULE_EXPORT const char *obs_module_description(void)
+{
+	return "Native SRTLA and RIST receiver, multistreaming, automation, and web dashboard plugin for OBS Studio.";
+}
 
 extern struct obs_source_info srtla_source_info;
 extern struct obs_source_info rist_source_info;
@@ -48,8 +59,8 @@ static void frontend_event_cb(enum obs_frontend_event event, void *private_data)
 	(void)private_data;
 	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
 		setup_srtla_menu();
-		obs_frontend_add_custom_qdock("srtla_status_dock", create_srtla_dock());
-		obs_frontend_add_custom_qdock("srtla_multistream_dock", create_srtla_multistream_dock());
+		obs_frontend_add_dock_by_id("srtla_status_dock", "Bonding Status", create_srtla_dock());
+		obs_frontend_add_dock_by_id("srtla_multistream_dock", "Multistream Status", create_srtla_multistream_dock());
 	}
 }
 
@@ -60,10 +71,10 @@ static void register_source_compat(struct obs_source_info *info)
 	uint32_t host_version = obs_get_version();
 	size_t info_size = sizeof(struct obs_source_info);
 
-	if (host_version < MAKE_SEMANTIC_VERSION(31, 0, 0) && info_size > 408) {
-		info_size = 408;
-	} else if (host_version < MAKE_SEMANTIC_VERSION(30, 0, 0) && info_size > 368) {
+	if (host_version < MAKE_SEMANTIC_VERSION(30, 0, 0) && info_size > 368) {
 		info_size = 368;
+	} else if (host_version < MAKE_SEMANTIC_VERSION(31, 0, 0) && info_size > 408) {
+		info_size = 408;
 	}
 
 	obs_register_source_s(info, info_size);
@@ -71,12 +82,15 @@ static void register_source_compat(struct obs_source_info *info)
 
 extern void srtla_init_log_handler(void);
 extern void srtla_free_log_handler(void);
+extern void rist_init_log_handler(void);
+extern void rist_free_log_handler(void);
 extern void pyleirl_shutdown(void);
 
 bool obs_module_load(void)
 {
 	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
 	srtla_init_log_handler();
+	rist_init_log_handler();
 	register_source_compat(&srtla_source_info);
 	register_source_compat(&rist_source_info);
 	register_source_compat(&srtla_stats_filter_info);
@@ -86,7 +100,11 @@ bool obs_module_load(void)
 
 void obs_module_unload(void)
 {
+	obs_frontend_remove_event_callback(frontend_event_cb, NULL);
+	obs_frontend_remove_dock("srtla_status_dock");
+	obs_frontend_remove_dock("srtla_multistream_dock");
 	pyleirl_shutdown();
+	rist_free_log_handler();
 	srtla_free_log_handler();
 	obs_log(LOG_INFO, "plugin unloaded");
 }

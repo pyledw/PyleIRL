@@ -1,0 +1,14 @@
+{
+  "$schema": "https://obsproject.com/schemas/plugin-manifest.json",
+  "id": "com.disneystreams.pyleirl",
+  "name": "@CMAKE_PROJECT_NAME@",
+  "display_name": "@PLUGIN_DISPLAY_NAME@",
+  "version": "@PLUGIN_VERSION@",
+  "author": "@PLUGIN_AUTHOR@",
+  "description": "Native SRTLA and RIST receiver, multistreaming, automation, and web dashboard plugin for OBS Studio.",
+  "urls": {
+    "website": "@PLUGIN_WEBSITE@",
+    "repository": "https://github.com/pyledw/PyleIRL"
+  }
+}
+

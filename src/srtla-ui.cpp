@@ -53,12 +53,11 @@ void rist_force_restart_by_name(const char *name);
 void rist_force_reload_by_name(const char *name);
 }
 
-SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("Bonding Status", parent)
+SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QWidget(parent)
 {
 	setObjectName("srtla_status_dock");
 
-	QWidget *centralWidget = new QWidget(this);
-	QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+	QVBoxLayout *mainLayout = new QVBoxLayout(this);
 	mainLayout->setContentsMargins(6, 6, 6, 6);
 	mainLayout->setSpacing(6);
 
@@ -71,7 +70,7 @@ SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("Bonding Sta
 	mainLayout->addWidget(metricsLabel);
 
 	// Resizable vertical splitter between Receiver Controls and Connections
-	splitter = new QSplitter(Qt::Vertical, centralWidget);
+	splitter = new QSplitter(Qt::Vertical, this);
 	splitter->setChildrenCollapsible(false);
 	splitter->setStyleSheet(
 		"QSplitter::handle:vertical { background-color: #333333; height: 5px; margin: 2px 0px; border-radius: 2px; } "
@@ -134,10 +133,6 @@ SrtlaStatusWidget::SrtlaStatusWidget(QWidget *parent) : QDockWidget("Bonding Sta
 	connect(splitter, &QSplitter::splitterMoved, this, &SrtlaStatusWidget::onSplitterMoved);
 
 	mainLayout->addWidget(splitter, 1);
-
-	setWidget(centralWidget);
-	setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
-		    QDockWidget::DockWidgetFloatable);
 
 	// Set up timer
 	updateTimer = new QTimer(this);
@@ -2336,12 +2331,11 @@ void SrtlaMultistreamDialog::saveSettings()
 	accept();
 }
 
-SrtlaMultistreamDock::SrtlaMultistreamDock(QWidget *parent) : QDockWidget("Multistream Status", parent)
+SrtlaMultistreamDock::SrtlaMultistreamDock(QWidget *parent) : QWidget(parent)
 {
 	setObjectName("srtla_multistream_dock");
 
-	QWidget *central = new QWidget(this);
-	QVBoxLayout *layout = new QVBoxLayout(central);
+	QVBoxLayout *layout = new QVBoxLayout(this);
 
 	statusTable = new QTableWidget();
 	statusTable->setColumnCount(4);
@@ -2351,8 +2345,6 @@ SrtlaMultistreamDock::SrtlaMultistreamDock(QWidget *parent) : QDockWidget("Multi
 	statusTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
 	statusTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 	layout->addWidget(statusTable);
-
-	setWidget(central);
 
 	connect(&MultistreamManager::instance(), &MultistreamManager::targetsChanged, this,
 		&SrtlaMultistreamDock::updateList);
