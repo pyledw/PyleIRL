@@ -643,7 +643,7 @@ void SrtlaStatusWidget::updateStatus()
 					QJsonObject cObj = connsArray[j].toObject();
 					QString ip = cObj["ip"].toString();
 					QString port = QString::number(cObj["port"].toInt());
-					QString connIdStr = groupIdStr + "_" + ip + ":" + port;
+					QString connIdStr = uniqueGroupIdStr + "_" + ip + ":" + port;
 					currentConnIds.insert(connIdStr);
 
 					uint64_t cBytes = cObj["bytes"].toVariant().toULongLong();
@@ -677,7 +677,7 @@ void SrtlaStatusWidget::updateStatus()
 				// Remove disconnected children
 				for (int k = groupItem->childCount() - 1; k >= 0; k--) {
 					QString linkText = groupItem->child(k)->text(0);
-					QString connIdStr = groupIdStr + "_" + linkText;
+					QString connIdStr = uniqueGroupIdStr + "_" + linkText;
 					if (!currentConnIds.contains(connIdStr)) {
 						delete groupItem->takeChild(k);
 					}
@@ -1643,6 +1643,8 @@ void SrtlaAutoSwitcher::handleFrontendEvent(enum obs_frontend_event event, void 
 			// Reset state so we are back in "manual" mode.
 			switcher->originalSceneName = "";
 			switcher->isCurrentlyFailover = false;
+			switcher->matchDurationCounter = 0;
+			switcher->recoveryDurationCounter = 0;
 		}
 		if (currentScene)
 			obs_source_release(currentScene);
@@ -2026,7 +2028,7 @@ void SrtlaAutoSwitcher::checkBitrate()
 			QJsonObject cObj = connsArray[j].toObject();
 			QString ip = cObj["ip"].toString();
 			QString port = QString::number(cObj["port"].toInt());
-			QString connIdStr = groupIdStr + "_" + ip + ":" + port;
+			QString connIdStr = QString::number(gPort) + "_" + groupIdStr + "_" + ip + ":" + port;
 
 			uint64_t cBytes = cObj["bytes"].toVariant().toULongLong();
 			uint64_t cPrevBytes = previousBytes.value(connIdStr, cBytes);
@@ -2057,8 +2059,21 @@ void SrtlaAutoSwitcher::checkBitrate()
 		currentPrimaryActive = true;
 	}
 
-	if (!currentPrimaryActive) {
-		int newPrimaryPort = 0;
+	int newPrimaryPort = 0;
+	// First priority: any port that is actively playing media AND receiving network data
+	for (auto it = portTotalKbps.begin(); it != portTotalKbps.end(); ++it) {
+		if (it.value() > 10.0 && (srtla_is_media_playing(it.key()) || rist_is_media_playing(it.key()))) {
+			if (it.key() == activePrimaryPort) {
+				newPrimaryPort = activePrimaryPort;
+				break;
+			}
+			if (newPrimaryPort == 0) {
+				newPrimaryPort = it.key();
+			}
+		}
+	}
+
+	if (!currentPrimaryActive && newPrimaryPort == 0) {
 		for (auto it = portTotalKbps.begin(); it != portTotalKbps.end(); ++it) {
 			if (srtla_is_media_playing(it.key()) || rist_is_media_playing(it.key()) || it.value() > 10.0) {
 				newPrimaryPort = it.key();
@@ -2095,33 +2110,36 @@ void SrtlaAutoSwitcher::checkBitrate()
 				}
 			}
 		}
-		
-		if (newPrimaryPort > 0 && newPrimaryPort != activePrimaryPort) {
-			activePrimaryPort = newPrimaryPort;
-			
-			struct PortContext {
-				int searchPort;
-				QString name;
-			} ctx;
-			ctx.searchPort = newPrimaryPort;
-			
-			obs_enum_sources([](void *data, obs_source_t *source) {
-				PortContext *c = static_cast<PortContext *>(data);
-				obs_data_t *settings = obs_source_get_settings(source);
-				if (settings) {
-					int p = (int)obs_data_get_int(settings, "listen_port");
-					if (p == c->searchPort) {
-						const char *n = obs_source_get_name(source);
-						if (n) c->name = QString::fromUtf8(n);
-					}
-					obs_data_release(settings);
+	}
+
+	if (newPrimaryPort > 0 && newPrimaryPort != activePrimaryPort) {
+		activePrimaryPort = newPrimaryPort;
+		matchDurationCounter = 0;
+		recoveryDurationCounter = 0;
+		networkDeadDurationMs[activePrimaryPort] = 0;
+
+		struct PortContext {
+			int searchPort;
+			QString name;
+		} ctx;
+		ctx.searchPort = newPrimaryPort;
+
+		obs_enum_sources([](void *data, obs_source_t *source) {
+			PortContext *c = static_cast<PortContext *>(data);
+			obs_data_t *settings = obs_source_get_settings(source);
+			if (settings) {
+				int p = (int)obs_data_get_int(settings, "listen_port");
+				if (p == c->searchPort) {
+					const char *n = obs_source_get_name(source);
+					if (n) c->name = QString::fromUtf8(n);
 				}
-				return c->name.isEmpty();
-			}, &ctx);
-			activePrimarySource = ctx.name;
-			obs_log(LOG_INFO, "[PyleIRL AutoSwitch] Locked onto primary receiver '%s' on port %d",
-				activePrimarySource.toUtf8().constData(), activePrimaryPort);
-		}
+				obs_data_release(settings);
+			}
+			return c->name.isEmpty();
+		}, &ctx);
+		activePrimarySource = ctx.name;
+		obs_log(LOG_INFO, "[PyleIRL AutoSwitch] Locked onto primary receiver '%s' on port %d",
+			activePrimarySource.toUtf8().constData(), activePrimaryPort);
 	}
 
 	if (enabled && activePrimaryPort > 0 && !failoverScene.isEmpty()) {

@@ -268,6 +268,10 @@ bool srtla_is_audio_starved(int listen_port) {
 __declspec(dllexport)
 #endif
 bool srtla_is_media_playing(int listen_port) {
+	if (listen_port > 0 && srtla_get_group_count_by_port(listen_port) == 0) {
+		return false;
+	}
+
 	pthread_mutex_lock(&sources_mutex);
 	struct srtla_source *curr = sources_head;
 	bool playing = false;
@@ -281,37 +285,46 @@ bool srtla_is_media_playing(int listen_port) {
 			curr = curr->next;
 			continue;
 		}
-		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 750000000ULL));
-		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 750000000ULL));
-		bool network_active = (curr->last_network_time > 0 && (now - curr->last_network_time < 1500000000ULL));
-
-		if (curr->media_source && obs_source_get_base_width(curr->media_source) == 0) {
-			video_playing = false;
+		if (srtla_get_group_count_by_port(curr->listen_port) == 0) {
+			curr = curr->next;
+			continue;
 		}
+		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 1500000000ULL));
+		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 1500000000ULL));
+		bool network_active = (curr->last_network_time > 0 && (now - curr->last_network_time < 2000000000ULL));
+		bool has_video_dims = (curr->media_source &&
+				       obs_source_get_base_width(curr->media_source) > 0 &&
+				       obs_source_get_base_height(curr->media_source) > 0);
 
-		if (srtla_global_quality < 15.0) {
+		if (!has_video_dims) {
 			video_playing = false;
+		} else if (network_active && (audio_playing || curr->last_audio_time == 0)) {
+			// Custom-draw sources (e.g. irl_source) do not expose async frames or media_get_time,
+			// and video_render is not called while on the Waiting/Failover scene.
+			// If the decoder has locked onto valid video resolution and data/audio are flowing, video is live.
+			video_playing = true;
 		}
 
 		if (!network_active) {
-			// Network bytes have stopped flowing for >1.5s -> connection stopped
+			// Network bytes have stopped flowing for >2.0s -> connection stopped
 			playing = false;
 		} else if (curr->last_audio_time > 0 && curr->last_video_time > 0) {
-			// If stream has both audio and video, require video to be playing
-			// This fixes the issue where a frozen video frame wouldn't trigger failover if audio kept going
 			if (audio_playing && video_playing) {
 				playing = true;
 				break;
 			}
 		} else if (curr->last_audio_time > 0) {
-			if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 3000000000ULL)) {
-				// Connected for >3s but still no video frames locked -> not playing
+			if (audio_playing && has_video_dims) {
+				playing = true;
+				break;
+			} else if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 5000000000ULL)) {
+				// Connected for >5s but still no video dimensions locked -> not playing
 				playing = false;
 			} else if (audio_playing) {
 				playing = true;
 				break;
 			}
-		} else if (curr->last_video_time > 0) {
+		} else if (curr->last_video_time > 0 || has_video_dims) {
 			if (video_playing) {
 				playing = true;
 				break;
@@ -816,6 +829,9 @@ static void srtla_check_video_frame_progress(struct srtla_source *context, uint6
 	if (!context || !context->media_source)
 		return;
 
+	uint32_t base_w = obs_source_get_base_width(context->media_source);
+	uint32_t base_h = obs_source_get_base_height(context->media_source);
+
 	struct obs_source_frame *frame = obs_source_get_frame(context->media_source);
 	if (frame) {
 		if (frame->width > 0 && frame->height > 0 && frame->timestamp != context->last_video_ts) {
@@ -825,11 +841,19 @@ static void srtla_check_video_frame_progress(struct srtla_source *context, uint6
 		obs_source_release_frame(context->media_source, frame);
 	}
 
-	if (obs_source_get_base_width(context->media_source) > 0) {
+	if (base_w > 0 && base_h > 0) {
 		uint64_t current_media_time = obs_source_media_get_time(context->media_source);
 		if (current_media_time != context->last_media_time) {
 			context->last_video_time = now;
 			context->last_media_time = current_media_time;
+		} else if (context->last_network_time > 0 && (now - context->last_network_time < 1500000000ULL)) {
+			// Custom-draw sources like obs-irl-source render directly to a GPU texture
+			// without populating obs_source_get_frame() or obs_source_media_get_time().
+			// When the decoder has locked onto valid video dimensions (base_w x base_h)
+			// and network bytes are actively arriving, mark video progress as active.
+			if (context->last_audio_time == 0 || (now - context->last_audio_time < 1500000000ULL)) {
+				context->last_video_time = now;
+			}
 		}
 	}
 }

@@ -229,32 +229,42 @@ bool rist_is_media_playing(int listen_port) {
 			curr = curr->next;
 			continue;
 		}
-		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 750000000ULL));
-		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 750000000ULL));
-		bool network_active = (curr->last_network_time > 0 && (now - curr->last_network_time < 1500000000ULL));
+		if (rist_get_peer_count_by_port(curr->listen_port) == 0) {
+			curr = curr->next;
+			continue;
+		}
+		bool audio_playing = (curr->last_audio_time > 0 && (now - curr->last_audio_time < 1500000000ULL));
+		bool video_playing = (curr->last_video_time > 0 && (now - curr->last_video_time < 1500000000ULL));
+		bool network_active = (curr->last_network_time > 0 && (now - curr->last_network_time < 2000000000ULL));
+		bool has_video_dims = (curr->media_source &&
+				       obs_source_get_base_width(curr->media_source) > 0 &&
+				       obs_source_get_base_height(curr->media_source) > 0);
 
-		if (curr->media_source && obs_source_get_base_width(curr->media_source) == 0) {
+		if (!has_video_dims) {
 			video_playing = false;
+		} else if (network_active && (audio_playing || curr->last_audio_time == 0)) {
+			video_playing = true;
 		}
 
 		if (!network_active) {
 			playing = false;
 		} else if (curr->last_audio_time > 0 && curr->last_video_time > 0) {
-			// If stream has both audio and video, require video to be playing
-			// This fixes the issue where a frozen video frame wouldn't trigger failover if audio kept going
 			if (audio_playing && video_playing) {
 				playing = true;
 				break;
 			}
 		} else if (curr->last_audio_time > 0) {
-			if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 3000000000ULL)) {
-				// Connected for >3s but still no video frames locked -> not playing
+			if (audio_playing && has_video_dims) {
+				playing = true;
+				break;
+			} else if (curr->media_source && curr->connected_since > 0 && (now - curr->connected_since > 5000000000ULL)) {
+				// Connected for >5s but still no video dimensions locked -> not playing
 				playing = false;
 			} else if (audio_playing) {
 				playing = true;
 				break;
 			}
-		} else if (curr->last_video_time > 0) {
+		} else if (curr->last_video_time > 0 || has_video_dims) {
 			if (video_playing) {
 				playing = true;
 				break;
@@ -788,6 +798,9 @@ static void rist_check_video_frame_progress(struct rist_source *context, uint64_
 	if (!context || !context->media_source)
 		return;
 
+	uint32_t base_w = obs_source_get_base_width(context->media_source);
+	uint32_t base_h = obs_source_get_base_height(context->media_source);
+
 	struct obs_source_frame *frame = obs_source_get_frame(context->media_source);
 	if (frame) {
 		if (frame->width > 0 && frame->height > 0 && frame->timestamp != context->last_video_ts) {
@@ -797,11 +810,15 @@ static void rist_check_video_frame_progress(struct rist_source *context, uint64_
 		obs_source_release_frame(context->media_source, frame);
 	}
 
-	if (obs_source_get_base_width(context->media_source) > 0) {
+	if (base_w > 0 && base_h > 0) {
 		uint64_t current_media_time = obs_source_media_get_time(context->media_source);
 		if (current_media_time != context->last_media_time) {
 			context->last_video_time = now;
 			context->last_media_time = current_media_time;
+		} else if (context->last_network_time > 0 && (now - context->last_network_time < 1500000000ULL)) {
+			if (context->last_audio_time == 0 || (now - context->last_audio_time < 1500000000ULL)) {
+				context->last_video_time = now;
+			}
 		}
 	}
 }
@@ -1087,14 +1104,12 @@ void rist_auto_recover_hung_sources()
 			// Cooldown of at least 10 seconds between recovery actions
 			bool in_cooldown = (s->last_recovery_time > 0 && (now - s->last_recovery_time < 10000000000ULL));
 
-			// Condition A: Video has been rendering for >= 12s, but zero audio packets ever arrived
-			bool missing_on_connect = (s->last_audio_time == 0 && s->last_video_time > 0 &&
-						   (now - s->connected_since >= 12000000000ULL) &&
-						   (now - s->last_video_time < 2000000000ULL));
-
-			// Condition B: Audio was receiving normally, but completely stopped for >= 8s while video is still active
-			bool audio_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time >= 8000000000ULL) &&
-					      s->last_video_time > 0 && (now - s->last_video_time < 2000000000ULL));
+			// Condition A & B & D: Disabled auto-reload on missing audio or video_time gap because
+			// custom-draw sources (irl_source) manage their own stream lifecycle and auto-reloading
+			// tears down a working video stream during minor network or audio fluctuations.
+			bool missing_on_connect = false;
+			bool audio_dropped = false;
+			bool video_dropped = false;
 
 			// Condition C: Audio severely starved (< 30kHz) continuously for >= 6s
 			bool audio_starved = false;
@@ -1113,10 +1128,6 @@ void rist_auto_recover_hung_sources()
 			// DISABLED: We now let irl-source's adaptive_speed handle drift smoothly instead of dropping the connection
 			bool severe_audio_drift = false;
 			s->drift_since = 0;
-
-			// Condition D: Audio is receiving normally, but video has completely stopped for >= 8s
-			bool video_dropped = (s->last_audio_time > 0 && (now - s->last_audio_time < 2000000000ULL) &&
-					      s->last_video_time > 0 && (now - s->last_video_time >= 8000000000ULL));
 
 			// Only attempt auto-recovery up to 2 times to avoid looping on video-only or mic-less streams
 			if (!in_cooldown && s->recovery_attempts < 2 && (missing_on_connect || audio_dropped || audio_starved || video_dropped || severe_audio_drift)) {
